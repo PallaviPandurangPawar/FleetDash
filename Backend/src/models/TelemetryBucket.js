@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 /**
  * MongoDB Bucket Pattern Schema for Fleet Telemetry
- * 
+ *
  * Group readings into buckets capped at `maxCount` readings per document.
  * Pre-aggregates metrics directly in the bucket header for fast analytics.
  */
@@ -27,10 +27,10 @@ const readingSubSchema = new mongoose.Schema(
 
 const telemetryBucketSchema = new mongoose.Schema(
   {
-    vehicleId: { type: String, required: true, index: true },
-    bucketStartTime: { type: Date, required: true, index: true },
+    vehicleId: { type: String, required: true },
+    bucketStartTime: { type: Date, required: true },
     bucketEndTime: { type: Date, required: true },
-    count: { type: Number, required: true, default: 0, index: true },
+    count: { type: Number, required: true, default: 0 },
     maxCount: { type: Number, required: true, default: 100 },
     summary: {
       minSpeed: { type: Number, default: 0 },
@@ -47,8 +47,9 @@ const telemetryBucketSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-telemetryBucketSchema.index({ vehicleId: 1, count: 1 });
-telemetryBucketSchema.index({ vehicleId: 1, bucketStartTime: -1 });
-telemetryBucketSchema.index({ 'readings.location': '2dsphere' });
+// One compound index serves both:
+//  - ingest: find newest open bucket for a vehicle (vehicleId, sort by time, count < max)
+//  - history: find a vehicle's buckets in a time range
+telemetryBucketSchema.index({ vehicleId: 1, bucketStartTime: -1, count: 1 });
 
 module.exports = mongoose.model('TelemetryBucket', telemetryBucketSchema);
