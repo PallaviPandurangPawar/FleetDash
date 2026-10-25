@@ -1,0 +1,2 @@
+# docker-compose.yml
+# Local dev services: MongoDB + Redis (Week 2). Run: docker compose up -d
