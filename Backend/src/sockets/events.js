@@ -1,2 +1,5 @@
-// Backend/src/sockets/events.js
-// Week 2: shared event name constants (vehicle:update, geofence:alert ...)
+// Names of the real-time events sent to clients
+module.exports = {
+  VEHICLE_UPDATE: 'vehicle:update',
+  GEOFENCE_ALERT: 'geofence:alert',
+};
