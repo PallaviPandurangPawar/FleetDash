@@ -20,8 +20,8 @@ exports.ingestBatch = async (req, res, next) => {
     if (!vehicleId || !Array.isArray(readings) || readings.length === 0) {
       return res.status(400).json({ error: 'vehicleId and a non-empty readings array are required' });
     }
-    const results = await bucketService.ingestBatch(vehicleId, readings);
-    res.status(201).json({ success: true, vehicleId, ingestedCount: results.length, details: results });
+    const result = await bucketService.ingestBatch(vehicleId, readings);
+    res.status(201).json({ success: true, vehicleId, ...result });
   } catch (error) {
     next(error);
   }

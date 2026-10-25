@@ -1,6 +1,11 @@
 const TelemetryBucket = require('../models/TelemetryBucket');
 const Vehicle = require('../models/Vehicle');
 const config = require('../config/config');
+const { parseBatch } = require('../utils/validators');
+const parsePool = require('../workers/parsePool');
+
+// Batches with at least this many readings are parsed in a worker thread
+const PARSE_OFFLOAD_THRESHOLD = parseInt(process.env.PARSE_OFFLOAD_THRESHOLD, 10) || 200;
 
 class BucketService {
   /**
@@ -86,7 +91,7 @@ class BucketService {
             batteryVoltage: reading.batteryVoltage,
             timestamp: readingTime,
           },
-          status: reading.speed > 3 ? 'in_transit' : reading.ignition ? 'idle' : 'active',
+          status: reading.speed > 3 ? 'in_transit' : reading.ignition ? 'idle' : 'offline',
         },
       }
     ).catch((err) => console.error(`[Vehicle Update Error] ${err.message}`));
@@ -100,16 +105,137 @@ class BucketService {
     };
   }
 
+  /**
+   * Calculates min / max / sum values for a chunk of readings.
+   */
+  _summarize(chunk) {
+    const s = {
+      minSpeed: Infinity,
+      maxSpeed: -Infinity,
+      sumSpeed: 0,
+      minFuel: Infinity,
+      maxFuel: -Infinity,
+      maxTemp: -Infinity,
+    };
+    for (const r of chunk) {
+      s.minSpeed = Math.min(s.minSpeed, r.speed);
+      s.maxSpeed = Math.max(s.maxSpeed, r.speed);
+      s.sumSpeed += r.speed;
+      s.minFuel = Math.min(s.minFuel, r.fuelLevel);
+      s.maxFuel = Math.max(s.maxFuel, r.fuelLevel);
+      s.maxTemp = Math.max(s.maxTemp, r.engineTemp);
+    }
+    return s;
+  }
+
+  /**
+   * Fast batch ingestion: one database write per bucket instead of one per reading.
+   * Large batches are validated and sorted in a worker thread.
+   */
   async ingestBatch(vehicleId, readingsList) {
     if (!Array.isArray(readingsList) || readingsList.length === 0) {
       throw new Error('readingsList must be a non-empty array');
     }
-    const results = [];
-    for (const item of readingsList) {
-      const res = await this.ingestTelemetry({ ...item, vehicleId });
-      results.push(res);
+
+    const maxCount = config.bucketMaxSize;
+
+    let parsed;
+    if (readingsList.length >= PARSE_OFFLOAD_THRESHOLD) {
+      console.log(`[Ingest] Offloading ${readingsList.length} readings to a parse worker`);
+      parsed = await parsePool.runTask('parseBatch', { readings: readingsList });
+    } else {
+      parsed = parseBatch(readingsList);
     }
-    return results;
+    const valid = parsed.valid;
+    const rejectedCount = parsed.rejectedCount;
+
+    const buckets = [];
+    let remaining = valid;
+
+    while (remaining.length > 0) {
+      const open = await TelemetryBucket.findOne({ vehicleId, count: { $lt: maxCount } })
+        .sort({ bucketStartTime: -1 })
+        .select('_id count')
+        .lean();
+
+      let chunk;
+      let bucketDoc;
+
+      if (open) {
+        // Fill the open bucket with as many readings as fit, in ONE write
+        chunk = remaining.slice(0, maxCount - open.count);
+        const s = this._summarize(chunk);
+
+        bucketDoc = await TelemetryBucket.findOneAndUpdate(
+          { _id: open._id, count: open.count }, // guard: skip if someone else changed it
+          {
+            $push: { readings: { $each: chunk } },
+            $inc: { count: chunk.length, 'summary.sumSpeed': s.sumSpeed },
+            $set: { bucketEndTime: chunk[chunk.length - 1].timestamp },
+            $min: { 'summary.minSpeed': s.minSpeed, 'summary.minFuelLevel': s.minFuel },
+            $max: {
+              'summary.maxSpeed': s.maxSpeed,
+              'summary.maxFuelLevel': s.maxFuel,
+              'summary.maxEngineTemp': s.maxTemp,
+            },
+          },
+          { new: true }
+        )
+          .select('_id count')
+          .lean();
+
+        if (!bucketDoc) continue; // bucket changed meanwhile, try again
+      } else {
+        // No open bucket: create a new one
+        chunk = remaining.slice(0, maxCount);
+        const s = this._summarize(chunk);
+
+        bucketDoc = await TelemetryBucket.create({
+          vehicleId,
+          bucketStartTime: chunk[0].timestamp,
+          bucketEndTime: chunk[chunk.length - 1].timestamp,
+          count: chunk.length,
+          maxCount,
+          summary: {
+            minSpeed: s.minSpeed,
+            maxSpeed: s.maxSpeed,
+            sumSpeed: s.sumSpeed,
+            avgSpeed: Number((s.sumSpeed / chunk.length).toFixed(2)),
+            minFuelLevel: s.minFuel,
+            maxFuelLevel: s.maxFuel,
+            maxEngineTemp: s.maxTemp,
+            totalDistanceKm: 0,
+          },
+          readings: chunk,
+        });
+      }
+
+      remaining = remaining.slice(chunk.length);
+      buckets.push({ bucketId: bucketDoc._id, added: chunk.length, bucketCount: bucketDoc.count });
+    }
+
+    // Update the vehicle's latest position once, using the newest reading
+    if (valid.length > 0) {
+      const last = valid[valid.length - 1];
+      Vehicle.findOneAndUpdate(
+        { vehicleId },
+        {
+          $set: {
+            lastKnownLocation: { type: 'Point', coordinates: last.location.coordinates, updatedAt: last.timestamp },
+            lastTelemetry: {
+              speed: last.speed,
+              fuelLevel: last.fuelLevel,
+              engineTemp: last.engineTemp,
+              batteryVoltage: last.batteryVoltage,
+              timestamp: last.timestamp,
+            },
+            status: last.speed > 3 ? 'in_transit' : last.ignition ? 'idle' : 'offline',
+          },
+        }
+      ).catch((err) => console.error(`[Vehicle Update Error] ${err.message}`));
+    }
+
+    return { ingestedCount: valid.length, rejectedCount, buckets };
   }
 
   async getVehicleReadings(vehicleId, startTime, endTime, limit = 500) {
