@@ -72,11 +72,6 @@ class BucketService {
         },
         readings: [reading],
       });
-    } else {
-      if (bucket.count > 0) {
-        bucket.summary.avgSpeed = Number((bucket.summary.sumSpeed / bucket.count).toFixed(2));
-        await bucket.save();
-      }
     }
 
     Vehicle.findOneAndUpdate(
@@ -164,13 +159,19 @@ class BucketService {
           _id: '$vehicleId',
           totalBuckets: { $sum: 1 },
           totalReadings: { $sum: '$count' },
+          totalSpeed: { $sum: '$summary.sumSpeed' },
           firstReading: { $min: '$bucketStartTime' },
           lastReading: { $max: '$bucketEndTime' },
           maxOverallSpeed: { $max: '$summary.maxSpeed' },
-          avgFleetSpeed: { $avg: '$summary.avgSpeed' },
           maxOverallEngineTemp: { $max: '$summary.maxEngineTemp' },
         },
       },
+      {
+        $addFields: {
+          avgFleetSpeed: { $round: [{ $divide: ['$totalSpeed', '$totalReadings'] }, 2] },
+        },
+      },
+      { $project: { totalSpeed: 0 } },
     ]);
     return stats[0] || { totalBuckets: 0, totalReadings: 0 };
   }
