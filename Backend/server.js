@@ -20,12 +20,14 @@ app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
-// Request logging middleware
-app.use((req, _res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.url}`);
-  next();
-});
+// Request logging middleware (set LOG_REQUESTS=false to disable, e.g. for load tests)
+if (process.env.LOG_REQUESTS !== 'false') {
+  app.use((req, _res, next) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] ${req.method} ${req.url}`);
+    next();
+  });
+}
 
 // Root Information Endpoint
 app.get('/', (_req, res) => {

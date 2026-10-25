@@ -56,7 +56,9 @@ class BucketService {
         $max: { 'summary.maxSpeed': reading.speed, 'summary.maxFuelLevel': reading.fuelLevel, 'summary.maxEngineTemp': reading.engineTemp },
       },
       { new: true, sort: { bucketStartTime: -1 } }
-    );
+    )
+      .select('_id count')
+      .lean();
 
     if (!bucket) {
       bucket = await TelemetryBucket.create({
@@ -79,7 +81,7 @@ class BucketService {
       });
     }
 
-    Vehicle.findOneAndUpdate(
+    Vehicle.updateOne(
       { vehicleId },
       {
         $set: {
@@ -217,7 +219,7 @@ class BucketService {
     // Update the vehicle's latest position once, using the newest reading
     if (valid.length > 0) {
       const last = valid[valid.length - 1];
-      Vehicle.findOneAndUpdate(
+      Vehicle.updateOne(
         { vehicleId },
         {
           $set: {

@@ -1,4 +1,6 @@
 const bucketService = require('../services/bucketService');
+const ingestionService = require('../services/ingestionService');
+const { normalizeReading } = require('../utils/validators');
 
 exports.ingestTelemetry = async (req, res, next) => {
   try {
@@ -7,7 +9,10 @@ exports.ingestTelemetry = async (req, res, next) => {
     if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
       return res.status(400).json({ error: 'coordinates must be an array of [longitude, latitude]' });
     }
-    const result = await bucketService.ingestTelemetry(req.body);
+    if (!normalizeReading(req.body)) {
+      return res.status(400).json({ error: 'Invalid reading: check coordinate ranges, speed and timestamp' });
+    }
+    const result = await ingestionService.add(vehicleId, req.body);
     res.status(201).json(result);
   } catch (error) {
     next(error);
