@@ -5,6 +5,7 @@ const cors = require('cors');
 const config = require('./src/config/config');
 const { connectDB, closeDB } = require('./src/config/db');
 const workerPool = require('./src/workers/workerPool');
+const { initSocketServer } = require('./src/sockets/socketServer');
 
 // Routes
 const healthRoutes = require('./src/routes/healthRoutes');
@@ -66,6 +67,8 @@ async function startServer() {
     console.log(`📦 MongoDB Bucket Pattern: max ${config.bucketMaxSize} readings/bucket`);
     console.log(`====================================================`);
   });
+
+  initSocketServer(serverInstance);
 
   return serverInstance;
 }

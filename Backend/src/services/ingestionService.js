@@ -1,5 +1,7 @@
 const bucketService = require('./bucketService');
+const redisService = require('./redisService');
 const config = require('../config/config');
+const { normalizeReading } = require('../utils/validators');
 
 /**
  * Group-commit buffer for telemetry ingestion.
@@ -60,6 +62,21 @@ class IngestionService {
         isBucketFull: last.bucketCount >= config.bucketMaxSize,
       };
       queue.forEach((item) => item.resolve(response));
+
+      // Tell the real-time layer about the newest position (fire and forget)
+      const newest = normalizeReading(queue[queue.length - 1].raw);
+      if (newest) {
+        redisService.publishVehicleUpdate({
+          vehicleId,
+          lon: newest.location.coordinates[0],
+          lat: newest.location.coordinates[1],
+          speed: newest.speed,
+          heading: newest.heading,
+          fuelLevel: newest.fuelLevel,
+          ignition: newest.ignition,
+          timestamp: newest.timestamp.getTime(),
+        });
+      }
     } catch (err) {
       queue.forEach((item) => item.reject(err));
     } finally {
