@@ -1,0 +1,2 @@
+# .github/workflows/ci.yml
+# CI/CD pipeline: install, lint, Jest tests, build backend + frontend (Week 4)
