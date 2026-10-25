@@ -156,4 +156,5 @@ class WorkerPool {
 const analyticsWorkerPath = path.join(__dirname, 'analyticsWorker.js');
 const pool = new WorkerPool(analyticsWorkerPath);
 
+pool.WorkerPool = WorkerPool;
 module.exports = pool;
