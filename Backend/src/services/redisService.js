@@ -1,18 +1,25 @@
 const { createClient } = require('../config/redis');
 
-const CHANNEL = 'fleet:updates';
+const CHANNEL = 'fleet:updates'; // newest position per vehicle
+const ALERT_CHANNEL = 'fleet:alerts'; // geofence alerts
 const publisher = createClient('pub');
 
-/**
- * Publishes the latest position of a vehicle. Never throws: a Redis problem
- * must not stop telemetry from being saved.
- */
-async function publishVehicleUpdate(update) {
+async function publish(channel, payload) {
   try {
-    await publisher.publish(CHANNEL, JSON.stringify(update));
+    await publisher.publish(channel, JSON.stringify(payload));
   } catch (err) {
-    console.error(`[Redis] publish failed: ${err.message}`);
+    console.error(`[Redis] publish to ${channel} failed: ${err.message}`);
   }
 }
 
-module.exports = { CHANNEL, publishVehicleUpdate };
+/** Publishes the latest position of a vehicle. Never throws. */
+function publishVehicleUpdate(update) {
+  return publish(CHANNEL, update);
+}
+
+/** Publishes a geofence alert. Never throws. */
+function publishAlert(alert) {
+  return publish(ALERT_CHANNEL, alert);
+}
+
+module.exports = { CHANNEL, ALERT_CHANNEL, publishVehicleUpdate, publishAlert };
