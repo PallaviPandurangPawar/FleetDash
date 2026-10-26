@@ -1,6 +1,6 @@
 const { Server } = require('socket.io');
 const { createClient } = require('../config/redis');
-const { CHANNEL } = require('../services/redisService');
+const { CHANNEL, ALERT_CHANNEL } = require('../services/redisService');
 const { encodeBatch } = require('../utils/binaryCodec');
 const EVENTS = require('./events');
 
@@ -8,9 +8,10 @@ const EVENTS = require('./events');
 const BROADCAST_MS = parseInt(process.env.BROADCAST_INTERVAL_MS, 10) || 100;
 
 /**
- * Attaches Socket.io to the HTTP server. Updates arrive from Redis, are collected
- * for a short window (the newest update per vehicle wins), and are sent to all
- * clients as ONE binary message.
+ * Attaches Socket.io to the HTTP server.
+ * - Vehicle updates arrive from Redis, are collected for a short window (the newest
+ *   update per vehicle wins) and are sent to all clients as ONE binary message.
+ * - Geofence alerts are rare, so each one is sent immediately as a JSON message.
  */
 function initSocketServer(httpServer) {
   const io = new Server(httpServer, {
@@ -22,16 +23,19 @@ function initSocketServer(httpServer) {
   // The subscriber queues its subscribe command until Redis is connected
   const subscriber = createClient('sub', { enableOfflineQueue: true });
 
-  subscriber.subscribe(CHANNEL, (err) => {
-    if (err) console.error(`[Socket.io] could not subscribe to ${CHANNEL}: ${err.message}`);
-    else console.log(`[Socket.io] listening to Redis channel ${CHANNEL}`);
+  subscriber.subscribe(CHANNEL, ALERT_CHANNEL, (err) => {
+    if (err) console.error(`[Socket.io] could not subscribe: ${err.message}`);
+    else console.log(`[Socket.io] listening to Redis channels ${CHANNEL} and ${ALERT_CHANNEL}`);
   });
 
   subscriber.on('message', (channel, message) => {
-    if (channel !== CHANNEL) return;
     try {
-      const update = JSON.parse(message);
-      pendingUpdates.set(update.vehicleId, update);
+      const data = JSON.parse(message);
+      if (channel === CHANNEL) {
+        pendingUpdates.set(data.vehicleId, data);
+      } else if (channel === ALERT_CHANNEL) {
+        io.emit(EVENTS.GEOFENCE_ALERT, data);
+      }
     } catch (err) {
       console.error(`[Socket.io] bad message skipped: ${err.message}`);
     }

@@ -13,6 +13,7 @@ const vehicleRoutes = require('./src/routes/vehicleRoutes');
 const telemetryRoutes = require('./src/routes/telemetryRoutes');
 const analyticsRoutes = require('./src/routes/analyticsRoutes');
 const geofenceRoutes = require('./src/routes/geofenceRoutes');
+const alertRoutes = require('./src/routes/alertRoutes');
 const { errorHandler, notFoundHandler } = require('./src/middlewares/errorHandler');
 
 const app = express();
@@ -43,6 +44,7 @@ app.get('/', (_req, res) => {
       telemetry: '/api/telemetry',
       analytics: '/api/analytics',
       geofences: '/api/geofences',
+      alerts: '/api/alerts',
     },
   });
 });
@@ -53,6 +55,7 @@ app.use('/api/vehicles', vehicleRoutes);
 app.use('/api/telemetry', telemetryRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/geofences', geofenceRoutes);
+app.use('/api/alerts', alertRoutes);
 
 // Error Handling
 app.use(notFoundHandler);
