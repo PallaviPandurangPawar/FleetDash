@@ -1,5 +1,7 @@
 const bucketService = require('./bucketService');
 const redisService = require('./redisService');
+const geofenceService = require('./geofenceService');
+const alertService = require('./alertService');
 const config = require('../config/config');
 const { normalizeReading } = require('../utils/validators');
 
@@ -63,10 +65,11 @@ class IngestionService {
       };
       queue.forEach((item) => item.resolve(response));
 
-      // Tell the real-time layer about the newest position (fire and forget)
+      // After the data is safely stored: tell the real-time layer and check geofences.
+      // Neither of these can fail or delay the request.
       const newest = normalizeReading(queue[queue.length - 1].raw);
       if (newest) {
-        redisService.publishVehicleUpdate({
+        const update = {
           vehicleId,
           lon: newest.location.coordinates[0],
           lat: newest.location.coordinates[1],
@@ -75,7 +78,15 @@ class IngestionService {
           fuelLevel: newest.fuelLevel,
           ignition: newest.ignition,
           timestamp: newest.timestamp.getTime(),
-        });
+        };
+
+        redisService.publishVehicleUpdate(update);
+
+        try {
+          geofenceService.check(update).forEach((event) => alertService.recordEvent(event));
+        } catch (err) {
+          console.error(`[Geofence] check failed: ${err.message}`);
+        }
       }
     } catch (err) {
       queue.forEach((item) => item.reject(err));
