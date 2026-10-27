@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch-path=./src --watch-path=./server.js server.js",
-    "test": "node --test"
+    "test": "jest"
   },
   "keywords": [
     "fleet-management",
@@ -27,6 +27,8 @@
     "socket.io": "^4.8.4"
   },
   "devDependencies": {
-    "socket.io-client": "^4.8.4"
+    "jest": "^30.5.2",
+    "socket.io-client": "^4.8.4",
+    "supertest": "^7.3.1"
   }
 }
