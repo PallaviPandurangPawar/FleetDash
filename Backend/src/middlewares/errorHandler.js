@@ -1,8 +1,16 @@
-function errorHandler(err, _req, res, _next) {
-  console.error('[Error Handler]', err);
+const logger = require('../utils/logger');
 
+function errorHandler(err, req, res, _next) {
   const statusCode = err.status || err.statusCode || 500;
   const message = err.message || 'Internal Server Error';
+
+  if (statusCode >= 500) {
+    // Real server problem: print the full error with stack trace
+    logger.error(`${req.method} ${req.originalUrl} -> ${statusCode}`, err);
+  } else {
+    // Client mistake (bad JSON, bad input): one short line is enough
+    logger.warn(`${req.method} ${req.originalUrl} -> ${statusCode}: ${message}`);
+  }
 
   res.status(statusCode).json({
     success: false,
