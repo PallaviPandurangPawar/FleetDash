@@ -55,3 +55,11 @@ export interface AlertSummary {
   exits: number;
   enters: number;
 }
+
+export interface AlertsResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  totalPages: number;
+  alerts: AlertRecord[];
+}
