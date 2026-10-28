@@ -7,7 +7,8 @@ module.exports = {
   // when that file gets real tests.
   testPathIgnorePatterns: [
     '/node_modules/',
-    '<rootDir>/tests/integration/',
+    '<rootDir>/tests/integration/geofences.test.js',
+    '<rootDir>/tests/integration/vehicles.test.js',
     '<rootDir>/tests/unit/analyticsWorker.test.js',
     '<rootDir>/tests/unit/bucketService.test.js',
   ],
