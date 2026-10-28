@@ -1,7 +1,15 @@
 const logger = require('../utils/logger');
 
+// Turns known database errors into proper client errors instead of 500s
+function statusFor(err) {
+  if (err.status || err.statusCode) return err.status || err.statusCode;
+  if (err.name === 'ValidationError' || err.name === 'CastError') return 400;
+  if (err.code === 11000) return 409; // duplicate key
+  return 500;
+}
+
 function errorHandler(err, req, res, _next) {
-  const statusCode = err.status || err.statusCode || 500;
+  const statusCode = statusFor(err);
   const message = err.message || 'Internal Server Error';
 
   if (statusCode >= 500) {

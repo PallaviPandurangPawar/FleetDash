@@ -30,23 +30,26 @@ exports.createVehicle = async (req, res, next) => {
 
 exports.getVehicles = async (req, res, next) => {
   try {
-    const { status, limit = 50, page = 1 } = req.query;
+    const { status } = req.query;
     const filter = {};
     if (status) filter.status = status;
 
-    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+    // Safe paging: bad values fall back to defaults instead of crashing
+    const pageSize = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
+    const pageNumber = Math.max(parseInt(req.query.page, 10) || 1, 1);
+
     const vehicles = await Vehicle.find(filter)
       .sort({ updatedAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit, 10));
+      .skip((pageNumber - 1) * pageSize)
+      .limit(pageSize);
 
     const total = await Vehicle.countDocuments(filter);
 
     res.json({
       success: true,
       total,
-      page: parseInt(page, 10),
-      totalPages: Math.ceil(total / parseInt(limit, 10)),
+      page: pageNumber,
+      totalPages: Math.ceil(total / pageSize),
       vehicles,
     });
   } catch (error) {
@@ -74,9 +77,11 @@ exports.updateVehicle = async (req, res, next) => {
     const { vehicleId } = req.params;
     const updates = req.body;
 
-    // Prevent direct manual overwrite of telemetry through this endpoint
+    // Telemetry comes from the ingest API, and the vehicleId is the vehicle's identity:
+    // neither can be changed through this endpoint
     delete updates.lastTelemetry;
     delete updates.lastKnownLocation;
+    delete updates.vehicleId;
 
     const vehicle = await Vehicle.findOneAndUpdate({ vehicleId }, updates, {
       new: true,
