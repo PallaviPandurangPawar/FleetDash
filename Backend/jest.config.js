@@ -8,4 +8,7 @@ module.exports = {
   testTimeout: 20000,
   // The suites share one test database and clean up "TEST-" data, so they must not run at the same time
   maxWorkers: 1,
+  // Coverage report: run "npm run test:coverage"
+  collectCoverageFrom: ['server.js', 'src/**/*.js'],
+  coverageDirectory: 'coverage',
 };
