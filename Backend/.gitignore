@@ -16,3 +16,6 @@ logs/
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Test coverage report
+coverage/
