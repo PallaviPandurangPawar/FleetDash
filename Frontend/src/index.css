@@ -1,2 +1,46 @@
 /* Frontend/src/index.css
    Global styles + CSS variables (Week 1) */
+
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --panel-2: #273449;
+  --border: #334155;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --ok: #22c55e;
+  --bad: #ef4444;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); }
+
+
+.layout { display: grid; grid-template-rows: 56px 1fr; height: 100%; }
+.layout-body { display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+
+.card { 
+   background: var(--panel-2); 
+   /*border: 1px solid var(--border); */
+   border-radius: 8px; padding: 10px 12px; 
+}
+
+.card-top
+{
+   display: flex;
+   justify-content: space-between;
+}
+.card-id
+{
+   font-size: 0.8rem;
+   color: var(--muted);
+}
+.card-meta 
+{ display: flex; 
+   justify-content: space-between;
+    font-size: 0.8rem; 
+    color: var(--muted);
+}
