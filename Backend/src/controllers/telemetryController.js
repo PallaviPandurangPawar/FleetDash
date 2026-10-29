@@ -17,6 +17,9 @@ exports.ingestBatch = async (req, res, next) => {
     const { vehicleId, readings } = req.body;
     const result = await bucketService.ingestBatch(vehicleId, readings);
     res.status(201).json({ success: true, vehicleId, ...result });
+
+    // After the response: update the live map and check geofences for every stored reading
+    ingestionService.afterStore(vehicleId, readings);
   } catch (error) {
     next(error);
   }

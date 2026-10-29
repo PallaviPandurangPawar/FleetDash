@@ -297,3 +297,74 @@ describe('/api/alerts', () => {
     expect(open.body.total).toBe(0);
   });
 });
+
+
+const ingestionService = require('../../src/services/ingestionService');
+
+describe('geofence checks for batch uploads and queued readings', () => {
+  beforeAll(async () => {
+    const res = await createFence({
+      name: 'TEST-BATCH-ZONE',
+      vehicleIds: ['TEST-GEO-BATCH', 'TEST-GEO-QUEUE', 'TEST-GEO-OLD'],
+    });
+    expect(res.status).toBe(201);
+    await geofenceService.refresh(); // load the new geofence into memory right away
+  });
+
+  // points is a list of [coordinates, seconds after the start]
+  const sendBatch = (vehicleId, points) =>
+    request(app)
+      .post('/api/telemetry/ingest-batch')
+      .send({
+        vehicleId,
+        readings: points.map(([coordinates, i]) => ({
+          coordinates,
+          speed: 40,
+          timestamp: new Date(BASE_TIME + i * 1000).toISOString(),
+        })),
+      });
+
+  test('a quick exit and re-entry inside one batch upload is detected', async () => {
+    const res = await sendBatch('TEST-GEO-BATCH', [[INSIDE, 0], [OUTSIDE, 1], [INSIDE, 2]]);
+    expect(res.status).toBe(201);
+
+    await waitFor(async () => (await alertsFor('TEST-GEO-BATCH')).body.total === 2);
+
+    const { alerts } = (await alertsFor('TEST-GEO-BATCH')).body;
+    expect(alerts.map((a) => a.type).sort()).toEqual(['enter', 'exit']);
+  });
+
+  test('readings that arrive in the same moment are all checked, not only the last one', async () => {
+    const raw = (coordinates, i) => ({
+      coordinates,
+      speed: 40,
+      timestamp: new Date(BASE_TIME + i * 1000).toISOString(),
+    });
+
+    // All three are queued in the same moment, so they are written and checked as one group
+    await Promise.all([
+      ingestionService.add('TEST-GEO-QUEUE', raw(INSIDE, 0)),
+      ingestionService.add('TEST-GEO-QUEUE', raw(OUTSIDE, 1)),
+      ingestionService.add('TEST-GEO-QUEUE', raw(INSIDE, 2)),
+    ]);
+
+    await waitFor(async () => (await alertsFor('TEST-GEO-QUEUE')).body.total === 2);
+
+    const { alerts } = (await alertsFor('TEST-GEO-QUEUE')).body;
+    expect(alerts.map((a) => a.type).sort()).toEqual(['enter', 'exit']);
+  });
+
+  test('an older reading that arrives late does not turn the vehicle state back', async () => {
+    const id = 'TEST-GEO-OLD';
+    await sendPosition(id, INSIDE, 10); // the service learns the vehicle is inside
+    await sendPosition(id, OUTSIDE, 20); // it leaves
+    await waitFor(async () => (await alertsFor(id)).body.total === 1);
+
+    const late = await sendBatch(id, [[INSIDE, 5]]); // older than what was already checked
+    expect(late.status).toBe(201);
+    await sendPosition(id, OUTSIDE, 30); // still outside: no change
+
+    await sleep(300);
+    expect((await alertsFor(id)).body.total).toBe(1); // still only the exit
+  });
+});

@@ -12,12 +12,14 @@ function makeFence({ id = 'f1', name = 'Zone', vehicleIds = null, ring } = {}) {
 const INSIDE = [88.35, 22.57];
 const OUTSIDE = [88.6, 22.57];
 const at = (vehicleId, [lon, lat]) => ({ vehicleId, lon, lat, timestamp: 1790000000000 });
+const atTime = (vehicleId, [lon, lat], timestamp) => ({ vehicleId, lon, lat, timestamp });
 
 beforeEach(() => {
   // Use fences created here instead of loading them from the database
   geofenceService.started = true;
   geofenceService.fences = [makeFence()];
   geofenceService.state = new Map();
+  geofenceService.lastSeen = new Map();
 });
 
 describe('geofenceService.check', () => {
@@ -80,5 +82,37 @@ describe('geofenceService.check', () => {
     const events = geofenceService.check(at('T1', [88.31, 22.52])); // inside big zone, outside small zone
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'exit', geofenceId: 'f2' });
+  });
+});
+
+describe('geofenceService.check with timestamps', () => {
+  test('reports a quick exit and re-entry when every reading is checked in time order', () => {
+    expect(geofenceService.check(atTime('T1', INSIDE, 1000))).toEqual([]);
+
+    const events = [
+      ...geofenceService.check(atTime('T1', OUTSIDE, 2000)),
+      ...geofenceService.check(atTime('T1', INSIDE, 3000)),
+    ];
+
+    expect(events.map((e) => e.type)).toEqual(['exit', 'enter']);
+  });
+
+  test('skips a reading that is older than one already checked, so the state is not turned back', () => {
+    geofenceService.check(atTime('T1', INSIDE, 2000));
+    expect(geofenceService.check(atTime('T1', OUTSIDE, 3000))).toHaveLength(1); // exit
+
+    // A late reading from before the exit: ignored
+    expect(geofenceService.check(atTime('T1', INSIDE, 1000))).toEqual([]);
+
+    // The vehicle is still outside, so this is not a change
+    expect(geofenceService.check(atTime('T1', OUTSIDE, 4000))).toEqual([]);
+  });
+
+  test('works for updates without a timestamp', () => {
+    geofenceService.check({ vehicleId: 'T1', lon: INSIDE[0], lat: INSIDE[1] });
+    const events = geofenceService.check({ vehicleId: 'T1', lon: OUTSIDE[0], lat: OUTSIDE[1] });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('exit');
   });
 });

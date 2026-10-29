@@ -11,6 +11,7 @@ class GeofenceService {
   constructor() {
     this.fences = []; // { id, name, vehicleIds (Set or null = all), polygon, bbox }
     this.state = new Map(); // "vehicleId|geofenceId" -> true if the vehicle was inside
+    this.lastSeen = new Map(); // vehicleId -> timestamp of the newest reading checked so far
     this.started = false;
     this.lastCount = -1;
   }
@@ -61,10 +62,20 @@ class GeofenceService {
   /**
    * Checks one vehicle position. Returns the list of events (exit / enter)
    * caused by this position. Usually empty.
+   *
+   * Positions must be checked oldest first. A position that is older than one
+   * already checked for the same vehicle is skipped, because it would turn the
+   * remembered inside/outside state back to an outdated one.
    */
   check(update) {
     if (!this.started) this._start();
     if (this.fences.length === 0) return [];
+
+    if (Number.isFinite(update.timestamp)) {
+      const last = this.lastSeen.get(update.vehicleId);
+      if (last !== undefined && update.timestamp < last) return [];
+      this.lastSeen.set(update.vehicleId, update.timestamp);
+    }
 
     const point = turf.point([update.lon, update.lat]);
     const events = [];
