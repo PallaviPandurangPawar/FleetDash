@@ -242,11 +242,9 @@ class BucketService {
 
   async getVehicleReadings(vehicleId, startTime, endTime, limit = 500) {
     const query = { vehicleId };
-    if (startTime || endTime) {
-      query.bucketEndTime = {};
-      if (startTime) query.bucketEndTime.$gte = new Date(startTime);
-      if (endTime) query.bucketStartTime = { $lte: new Date(endTime) };
-    }
+    // A bucket overlaps the time window if it ends after the start and begins before the end
+    if (startTime) query.bucketEndTime = { $gte: new Date(startTime) };
+    if (endTime) query.bucketStartTime = { $lte: new Date(endTime) };
 
     const buckets = await TelemetryBucket.find(query)
       .sort({ bucketStartTime: -1 })

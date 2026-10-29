@@ -159,3 +159,7 @@ if (parentPort) {
     }
   });
 }
+
+
+// Exported so the maths can be tested directly (inside the worker thread this is not used)
+module.exports = { haversineDistance, isPointInPolygon, computeTripAnalytics, evaluateGeofences };
