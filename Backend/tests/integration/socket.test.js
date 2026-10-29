@@ -260,3 +260,28 @@ describe('when nobody is connected', () => {
     expect(recordsFor(batches, 'TEST-RT-OLD')).toHaveLength(0);
   });
 });
+
+
+
+describe('batch uploads', () => {
+  test('appear on the client as one update with the newest position', async () => {
+    const client = await connect();
+    const batches = collectBatches(client);
+
+    const readings = [0, 1, 2].map((i) => ({
+      coordinates: [88.31 + i * 0.01, 22.55],
+      speed: 30 + i,
+      timestamp: new Date(Date.now() + i * 1000).toISOString(),
+    }));
+    const res = await request(app).post('/api/telemetry/ingest-batch').send({ vehicleId: 'TEST-RT-BATCH', readings });
+    expect(res.status).toBe(201);
+
+    await waitFor(() => recordsFor(batches, 'TEST-RT-BATCH').length > 0);
+    await sleep(300); // make sure no older reading is sent after it
+
+    const records = recordsFor(batches, 'TEST-RT-BATCH');
+    expect(records).toHaveLength(1);
+    expect(records[0].lon).toBeCloseTo(88.33, 5);
+    expect(records[0].speed).toBe(32);
+  });
+});
