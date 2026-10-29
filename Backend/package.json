@@ -7,7 +7,9 @@
     "start": "node server.js",
     "dev": "node --watch-path=./src --watch-path=./server.js server.js",
     "test": "jest",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "seed": "node scripts/seed.js",
+    "seed:reset": "node scripts/seed.js --reset"
   },
   "keywords": [
     "fleet-management",
