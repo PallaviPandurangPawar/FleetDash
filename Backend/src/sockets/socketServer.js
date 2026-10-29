@@ -1,11 +1,9 @@
 const { Server } = require('socket.io');
 const { createClient } = require('../config/redis');
+const socketConfig = require('../config/socket');
 const { CHANNEL, ALERT_CHANNEL } = require('../services/redisService');
 const { encodeBatch } = require('../utils/binaryCodec');
 const EVENTS = require('./events');
-
-// How often collected updates are sent to clients (ms)
-const BROADCAST_MS = parseInt(process.env.BROADCAST_INTERVAL_MS, 10) || 100;
 
 /**
  * Attaches Socket.io to the HTTP server.
@@ -14,18 +12,20 @@ const BROADCAST_MS = parseInt(process.env.BROADCAST_INTERVAL_MS, 10) || 100;
  * - Geofence alerts are rare, so each one is sent immediately as a JSON message.
  */
 function initSocketServer(httpServer) {
-  const io = new Server(httpServer, {
-    cors: { origin: process.env.CORS_ORIGIN || '*' },
-  });
+  const io = new Server(httpServer, socketConfig.serverOptions());
 
   const pendingUpdates = new Map(); // vehicleId -> latest update
 
   // The subscriber queues its subscribe command until Redis is connected
   const subscriber = createClient('sub', { enableOfflineQueue: true });
 
-  subscriber.subscribe(CHANNEL, ALERT_CHANNEL, (err) => {
-    if (err) console.error(`[Socket.io] could not subscribe: ${err.message}`);
-    else console.log(`[Socket.io] listening to Redis channels ${CHANNEL} and ${ALERT_CHANNEL}`);
+  // Resolves when the Redis subscription is active (tests wait for this before publishing)
+  io.ready = new Promise((resolve) => {
+    subscriber.subscribe(CHANNEL, ALERT_CHANNEL, (err) => {
+      if (err) console.error(`[Socket.io] could not subscribe: ${err.message}`);
+      else console.log(`[Socket.io] listening to Redis channels ${CHANNEL} and ${ALERT_CHANNEL}`);
+      resolve();
+    });
   });
 
   subscriber.on('message', (channel, message) => {
@@ -41,7 +41,7 @@ function initSocketServer(httpServer) {
     }
   });
 
-  setInterval(() => {
+  const broadcastTimer = setInterval(() => {
     if (pendingUpdates.size === 0) return;
 
     // Nobody is connected: drop the updates instead of building useless messages
@@ -53,7 +53,15 @@ function initSocketServer(httpServer) {
     const payload = encodeBatch([...pendingUpdates.values()]);
     pendingUpdates.clear();
     io.emit(EVENTS.VEHICLE_BATCH, payload);
-  }, BROADCAST_MS);
+  }, socketConfig.broadcastIntervalMs);
+
+  // Closing the server also stops the timer and the Redis subscription
+  const closeServer = io.close.bind(io);
+  io.close = (callback) => {
+    clearInterval(broadcastTimer);
+    subscriber.disconnect();
+    return closeServer(callback);
+  };
 
   io.on('connection', (socket) => {
     console.log(`[Socket.io] client connected: ${socket.id} (total ${io.engine.clientsCount})`);
