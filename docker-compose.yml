@@ -1,2 +1,63 @@
 # docker-compose.yml
-# Local dev services: MongoDB + Redis (Week 2). Run: docker compose up -d
+# Runs the whole backend stack: MongoDB + Redis + the FleetDash backend.
+#
+#   docker compose up -d --build     start everything (the first time it builds the backend image)
+#   docker compose ps                check that everything is healthy
+#   docker compose logs -f backend   watch the backend log
+#   docker compose down              stop everything (the data is kept); add -v to delete the data too
+#
+# Host ports: 5000 (backend), 27018 (MongoDB), 6380 (Redis).
+# MongoDB and Redis use different host ports than their defaults, so they do not clash
+# with copies that are already installed on your PC.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./Backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-5000}:5000"
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGODB_URI: mongodb://mongo:27017/fleetdash
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: "${CORS_ORIGIN:-*}"
+      LOG_REQUESTS: "true"
+    # Start the backend only after MongoDB and Redis answer
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  redis_data:
