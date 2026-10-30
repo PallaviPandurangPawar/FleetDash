@@ -1,6 +1,7 @@
 // Frontend/src/components/vehicles/VehicleCard.tsx
 // Week 1: single vehicle summary
 import { DisplayVehicle } from '../../types/telemetry';
+import StatusBadge from '../common/StatusBadge';
 
 interface Props {
     vehicle: DisplayVehicle;
@@ -11,6 +12,7 @@ export function VehicleCard({ vehicle }: Props) {
         <div className="card">
             <div className="card-top">
                 <span className = "card_id">{vehicle.vehicleId}</span>
+                 <StatusBadge status={vehicle.status} />
             </div>
 
             <div className = "card-meta">
