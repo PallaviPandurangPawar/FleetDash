@@ -1,2 +1,93 @@
-# .github/workflows/ci.yml
-# CI/CD pipeline: install, lint, Jest tests, build backend + frontend (Week 4)
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+# Cancel an older run of the same branch when a newer commit is pushed
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Backend
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the tests with coverage
+        run: npm run test:coverage
+
+      - name: Save the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: Backend/coverage
+          if-no-files-found: ignore
+
+  docker-stack:
+    name: Docker stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Build the image and start MongoDB, Redis and the backend
+        run: docker compose up -d --build --wait --wait-timeout 180
+
+      - name: Check the health route
+        run: curl --fail --silent --show-error http://localhost:5000/api/health
+
+      - name: Send one telemetry reading
+        run: |
+          curl --fail --silent --show-error -X POST http://localhost:5000/api/telemetry/ingest \
+            -H "Content-Type: application/json" \
+            -d '{"vehicleId":"CI-01","coordinates":[88.36,22.57],"speed":40}' | grep -q '"success":true'
+
+      - name: Show the logs if something failed
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop everything
+        if: always()
+        run: docker compose down -v
