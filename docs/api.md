@@ -20,7 +20,8 @@ Some controllers return a short form: `{ "error": "message" }`. The status codes
 ```json
 { "status": "ok", "timestamp": "...", "service": "FleetDash Backend Engine", "database": "connected",
   "workerPool": { "poolSize": 4, "activeWorkers": 0, "idleWorkers": 4, "pendingTasks": 0, "completedTasks": 0 },
-  "uptimeSeconds": 372, "nodeVersion": "v22.23.4", "memoryUsageMB": 141 }
+  "uptimeSeconds": 372, "nodeVersion": "v22.23.4", "memoryUsageMB": 141,
+  "realtime": { "redis": "ready", "socketServer": "running", "socketClients": 3 } }
 ```
 
 ## Vehicles
@@ -202,3 +203,5 @@ socket.on('vehicles:binary', (data) => {
 
 socket.on('geofence:alert', (alert) => console.log('ALERT', alert.type, alert.vehicleId, alert.geofenceName));
 ```
+
+`realtime.redis` is the state of the Redis publisher (`ready` when healthy, `reconnecting` or `end` otherwise) and `realtime.socketClients` is the number of connected dashboards.

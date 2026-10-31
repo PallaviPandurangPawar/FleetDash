@@ -30,6 +30,7 @@ class WorkerPool {
       id: index,
       worker,
       isBusy: false,
+      isDead: false, // true once the worker failed or was stopped: it must not get new tasks
       currentTaskId: null,
     };
 
@@ -45,6 +46,8 @@ class WorkerPool {
     worker.on('exit', (code) => {
       if (code !== 0 && !this.isTerminated) {
         console.warn(`[WorkerPool] Worker #${index} stopped with exit code ${code}. Respawning...`);
+        // A task that was still running on this worker will never be answered, so fail it now
+        this._handleWorkerFailure(workerEntry, new Error(`Worker #${index} stopped unexpectedly (exit code ${code})`));
         this._respawnWorker(index);
       }
     });
@@ -83,6 +86,8 @@ class WorkerPool {
   }
 
   _handleWorkerFailure(workerEntry, err) {
+    workerEntry.isDead = true;
+
     if (workerEntry.currentTaskId) {
       const callback = this.taskCallbacks.get(workerEntry.currentTaskId);
       if (callback) {
@@ -98,7 +103,7 @@ class WorkerPool {
   _dispatchNext() {
     if (this.taskQueue.length === 0) return;
 
-    const idleWorker = this.workers.find((w) => !w.isBusy);
+    const idleWorker = this.workers.find((w) => w && !w.isBusy && !w.isDead);
     if (!idleWorker) return;
 
     const task = this.taskQueue.shift();
@@ -121,11 +126,21 @@ class WorkerPool {
 
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        if (this.taskCallbacks.has(taskId)) {
-          this.taskCallbacks.delete(taskId);
-          this.taskQueue = this.taskQueue.filter((t) => t.taskId !== taskId);
-          reject(new Error(`Worker task ${type} timed out after ${timeoutMs}ms`));
+        if (!this.taskCallbacks.has(taskId)) return;
+
+        this.taskCallbacks.delete(taskId);
+        this.taskQueue = this.taskQueue.filter((t) => t.taskId !== taskId);
+
+        // If the task was running, its worker may be stuck for good: replace it
+        const stuck = this.workers.find((w) => w && w.currentTaskId === taskId);
+        if (stuck) {
+          stuck.isDead = true;
+          stuck.isBusy = false;
+          stuck.currentTaskId = null;
+          stuck.worker.terminate(); // its exit event starts a fresh worker
         }
+
+        reject(new Error(`Worker task ${type} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
       this.taskCallbacks.set(taskId, { resolve, reject, timeoutId });
@@ -135,7 +150,7 @@ class WorkerPool {
   }
 
   getStats() {
-    const activeWorkers = this.workers.filter((w) => w.isBusy).length;
+    const activeWorkers = this.workers.filter((w) => w && w.isBusy).length;
     return {
       poolSize: this.poolSize,
       activeWorkers,

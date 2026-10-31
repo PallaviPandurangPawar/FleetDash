@@ -5,6 +5,8 @@ const cors = require('cors');
 const config = require('./src/config/config');
 const { connectDB, closeDB } = require('./src/config/db');
 const workerPool = require('./src/workers/workerPool');
+const parsePool = require('./src/workers/parsePool');
+const redisService = require('./src/services/redisService');
 const { initSocketServer } = require('./src/sockets/socketServer');
 
 // Routes
@@ -62,36 +64,61 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 let serverInstance = null;
+let io = null;
+let stopping = null; // set while (or after) the server is being stopped
 
-async function startServer() {
+/** Connects to the database, starts the HTTP server and the real-time server. Use port 0 for any free port. */
+async function startServer(port = config.port) {
+  stopping = null;
   await connectDB();
 
-  serverInstance = app.listen(config.port, () => {
-    console.log(`====================================================`);
-    console.log(`🚀 FleetDash Backend Server listening on port ${config.port}`);
-    console.log(`⚡ Worker Threads Pool: ${config.workerPoolSize} threads active`);
-    console.log(`📦 MongoDB Bucket Pattern: max ${config.bucketMaxSize} readings/bucket`);
-    console.log(`====================================================`);
+  await new Promise((resolve, reject) => {
+    serverInstance = app.listen(port, resolve);
+    serverInstance.once('error', reject);
   });
 
-  initSocketServer(serverInstance);
+  io = initSocketServer(serverInstance);
+  app.set('io', io); // lets the health route report the real-time layer
+
+  console.log(`====================================================`);
+  console.log(`🚀 FleetDash Backend Server listening on port ${serverInstance.address().port}`);
+  console.log(`⚡ Worker Threads Pool: ${config.workerPoolSize} threads active`);
+  console.log(`📦 MongoDB Bucket Pattern: max ${config.bucketMaxSize} readings/bucket`);
+  console.log(`====================================================`);
 
   return serverInstance;
 }
 
-// Graceful shutdown
+/** Stops everything in order. Safe to call more than once. */
+function stopServer() {
+  if (stopping) return stopping;
+
+  stopping = (async () => {
+    if (io) {
+      // Disconnects every client, stops the broadcast timer and the Redis subscription, closes the HTTP server
+      await new Promise((resolve) => io.close(resolve));
+      io = null;
+      app.set('io', null);
+    } else if (serverInstance) {
+      await new Promise((resolve) => serverInstance.close(resolve));
+    }
+    serverInstance = null;
+
+    await workerPool.terminate();
+    await parsePool.terminate();
+    await redisService.close();
+    await closeDB();
+  })();
+
+  return stopping;
+}
+
+// Graceful shutdown on Ctrl+C or "docker stop"
 async function gracefulShutdown(signal) {
   console.log(`\n[Server] Received ${signal}. Commencing graceful shutdown...`);
 
-  if (serverInstance) {
-    serverInstance.close(() => {
-      console.log('[Server] HTTP server closed');
-    });
-  }
-
   try {
-    await workerPool.terminate();
-    await closeDB();
+    await stopServer();
     console.log('[Server] Graceful shutdown completed cleanly.');
     process.exit(0);
   } catch (err) {
@@ -110,4 +137,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, startServer };
+module.exports = { app, startServer, stopServer };
