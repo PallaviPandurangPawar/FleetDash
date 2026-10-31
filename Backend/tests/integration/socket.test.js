@@ -285,3 +285,28 @@ describe('batch uploads', () => {
     expect(records[0].speed).toBe(32);
   });
 });
+
+
+const { createClient } = require('../../src/config/redis');
+
+describe('bad messages on the Redis channel', () => {
+  test('are skipped and the live updates keep working', async () => {
+    const client = await connect();
+    const batches = collectBatches(client);
+    const rawPublisher = createClient('test-raw', { enableOfflineQueue: true });
+
+    try {
+      await publishUntil(
+        async () => {
+          await rawPublisher.publish('fleet:updates', 'this is not json');
+          await publishVehicleUpdate(update('TEST-RT-AFTERBAD'));
+        },
+        () => recordsFor(batches, 'TEST-RT-AFTERBAD').length > 0
+      );
+    } finally {
+      rawPublisher.disconnect();
+    }
+
+    expect(recordsFor(batches, 'TEST-RT-AFTERBAD')[0].lon).toBe(88.36);
+  });
+});

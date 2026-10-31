@@ -22,4 +22,19 @@ function publishAlert(alert) {
   return publish(ALERT_CHANNEL, alert);
 }
 
-module.exports = { CHANNEL, ALERT_CHANNEL, publishVehicleUpdate, publishAlert };
+/** Connection state of the publisher: "ready" when healthy, "reconnecting" or "end" otherwise */
+function getStatus() {
+  return publisher.status;
+}
+
+/** Closes the publisher connection (used when the server shuts down) */
+async function close() {
+  if (publisher.status === 'end') return;
+  try {
+    await publisher.quit();
+  } catch (_err) {
+    publisher.disconnect();
+  }
+}
+
+module.exports = { CHANNEL, ALERT_CHANNEL, publishVehicleUpdate, publishAlert, getStatus, close };
