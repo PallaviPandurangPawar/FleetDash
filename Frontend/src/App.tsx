@@ -7,6 +7,7 @@ import Sidebar from './components/layout/Sidebar';
 import {VehicleCard} from './components/vehicles/VehicleCard';
 import  VehicleList  from './components/vehicles/VehicleList';
 import { DisplayVehicle } from './types/telemetry';
+import MapCanvas from './components/map/MapCanvas';
 
 const FAKE: DisplayVehicle[] = [
   { vehicleId: 'SIM-001', plateNumber: 'WB-SIM-001', driverName: 'Ravi', status: 'in_transit', speed: 47.3, fuelLevel: 82.6, live: true },
@@ -30,7 +31,7 @@ export default function App() {
       sidebar = {<Sidebar vehicles={FAKE} />}
       
     >
-      <div style={{ background: '#0b1220', padding: 16 }}>MAP AREA</div>
+      <MapCanvas vehicleCount={FAKE.length} />
     </DashboardLayout>
   );
 }
