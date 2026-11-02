@@ -3,11 +3,17 @@ const Vehicle = require('../models/Vehicle');
 const config = require('../config/config');
 const { parseBatch } = require('../utils/validators');
 const parsePool = require('../workers/parsePool');
+const vehicleStateWriter = require('./vehicleStateWriter');
 
 // Batches with at least this many readings are parsed in a worker thread
 const PARSE_OFFLOAD_THRESHOLD = parseInt(process.env.PARSE_OFFLOAD_THRESHOLD, 10) || 200;
 
 class BucketService {
+  constructor() {
+    // vehicleId -> { _id, count } of the bucket that still has room, so a write needs no lookup first
+    this.openBuckets = new Map();
+  }
+
   /**
    * Ingests a single telemetry reading using MongoDB Bucket Pattern.
    * Atomically appends to an open bucket or creates a new bucket if full.
@@ -131,6 +137,29 @@ class BucketService {
   }
 
   /**
+   * The bucket of a vehicle that still has room. Remembered in memory after the first lookup,
+   * so most writes need no lookup at all. A wrong guess is caught by the guard in the update.
+   */
+  async _findOpenBucket(vehicleId, maxCount) {
+    const remembered = this.openBuckets.get(vehicleId);
+    if (remembered && remembered.count < maxCount) return remembered;
+
+    const open = await TelemetryBucket.findOne({ vehicleId, count: { $lt: maxCount } })
+      .sort({ bucketStartTime: -1 })
+      .select('_id count')
+      .lean();
+
+    if (open) this.openBuckets.set(vehicleId, { _id: open._id, count: open.count });
+    else this.openBuckets.delete(vehicleId);
+    return open;
+  }
+
+  _rememberOpenBucket(vehicleId, bucketDoc, maxCount) {
+    if (bucketDoc.count < maxCount) this.openBuckets.set(vehicleId, { _id: bucketDoc._id, count: bucketDoc.count });
+    else this.openBuckets.delete(vehicleId);
+  }
+
+  /**
    * Fast batch ingestion: one database write per bucket instead of one per reading.
    * Large batches are validated and sorted in a worker thread.
    */
@@ -155,10 +184,7 @@ class BucketService {
     let remaining = valid;
 
     while (remaining.length > 0) {
-      const open = await TelemetryBucket.findOne({ vehicleId, count: { $lt: maxCount } })
-        .sort({ bucketStartTime: -1 })
-        .select('_id count')
-        .lean();
+      const open = await this._findOpenBucket(vehicleId, maxCount);
 
       let chunk;
       let bucketDoc;
@@ -186,7 +212,11 @@ class BucketService {
           .select('_id count')
           .lean();
 
-        if (!bucketDoc) continue; // bucket changed meanwhile, try again
+        if (!bucketDoc) {
+          // The bucket changed or was removed behind our back: forget it and look again
+          this.openBuckets.delete(vehicleId);
+          continue;
+        }
       } else {
         // No open bucket: create a new one
         chunk = remaining.slice(0, maxCount);
@@ -212,29 +242,14 @@ class BucketService {
         });
       }
 
+      this._rememberOpenBucket(vehicleId, bucketDoc, maxCount);
       remaining = remaining.slice(chunk.length);
       buckets.push({ bucketId: bucketDoc._id, added: chunk.length, bucketCount: bucketDoc.count });
     }
 
-    // Update the vehicle's latest position once, using the newest reading
+    // The vehicle's latest position is written together with the other vehicles every half second
     if (valid.length > 0) {
-      const last = valid[valid.length - 1];
-      Vehicle.updateOne(
-        { vehicleId },
-        {
-          $set: {
-            lastKnownLocation: { type: 'Point', coordinates: last.location.coordinates, updatedAt: last.timestamp },
-            lastTelemetry: {
-              speed: last.speed,
-              fuelLevel: last.fuelLevel,
-              engineTemp: last.engineTemp,
-              batteryVoltage: last.batteryVoltage,
-              timestamp: last.timestamp,
-            },
-            status: last.speed > 3 ? 'in_transit' : last.ignition ? 'idle' : 'offline',
-          },
-        }
-      ).catch((err) => console.error(`[Vehicle Update Error] ${err.message}`));
+      vehicleStateWriter.record(vehicleId, valid[valid.length - 1]);
     }
 
     return { ingestedCount: valid.length, rejectedCount, buckets };

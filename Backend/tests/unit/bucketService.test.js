@@ -270,3 +270,39 @@ describe('getBucketStats', () => {
     expect(await bucketService.getBucketStats('TEST-BS-NOBODY')).toEqual({ totalBuckets: 0, totalReadings: 0 });
   });
 });
+
+
+
+describe('the remembered open bucket', () => {
+  test('keeps working when the bucket was deleted behind its back', async () => {
+    const id = 'TEST-BS-GONE';
+    await bucketService.ingestBatch(id, readings(0, 3));
+    await TelemetryBucket.deleteMany({ vehicleId: id });
+
+    const res = await bucketService.ingestBatch(id, readings(3, 2));
+
+    expect(res.ingestedCount).toBe(2);
+    expect((await bucketsOf(id)).map((b) => b.count)).toEqual([2]);
+  });
+
+  test('keeps working when another writer changed the bucket', async () => {
+    const id = 'TEST-BS-SHARED';
+    await bucketService.ingestBatch(id, readings(0, 3));
+    await single(id, 3); // the single-reading path writes into the same open bucket
+
+    const res = await bucketService.ingestBatch(id, readings(4, 2));
+
+    expect(res.ingestedCount).toBe(2);
+    expect((await bucketsOf(id)).map((b) => b.count)).toEqual([6]);
+  });
+
+  test('finds the open bucket again after a restart (empty memory)', async () => {
+    const id = 'TEST-BS-RESTART';
+    await bucketService.ingestBatch(id, readings(0, 3));
+    bucketService.openBuckets.clear(); // what a freshly started server remembers
+
+    await bucketService.ingestBatch(id, readings(3, 2));
+
+    expect((await bucketsOf(id)).map((b) => b.count)).toEqual([5]);
+  });
+});

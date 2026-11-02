@@ -170,7 +170,7 @@ share one database, so Jest runs them one after another.
 ## Load testing
 
 k6 scripts are in `loadtests/` and the measured results are in `loadtests/README.md`:
-about 1,950 requests per second sustained with no lost data, p95 under 500 ms, and bucket queries around 1 ms.
+2,000 requests per second sustained with no lost data, p95 under 100 ms, and bucket queries around 1 ms.
 
 ## Project structure
 
