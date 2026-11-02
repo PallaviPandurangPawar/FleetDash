@@ -12,12 +12,12 @@ blocking the server.
 |---|---|---|
 | Ingestion API | Node.js, Express | Receives and validates readings |
 | Parse and analytics workers | `worker_threads` | Heavy work off the main thread |
-| Database | MongoDB, Bucket Pattern | Stores readings in groups of up to 100 |
+| Database | MongoDB, hourly buckets | One bucket per vehicle per clock hour (safety cap 1,000 readings) |
 | Message broker | Redis Pub/Sub | Separates ingestion from client notification |
 | Real-time server | Socket.io | Sends live positions and alerts to dashboards |
 | Geofence engine | Turf.js | Detects when vehicles enter or leave zones |
 | Dashboard | React, Canvas API | Live map (frontend team, see `Frontend/README.md`) |
-| Tests | Jest, Supertest | 258 tests, about 93 percent coverage |
+| Tests | Jest, Supertest | 272 tests, about 93 percent coverage |
 | CI and deployment | GitHub Actions, Docker | Automatic checks, one-command stack |
 
 ## Data flow
@@ -50,26 +50,27 @@ blocking the server.
    geofences, oldest first. This is the same for `/ingest` and `/ingest-batch`.
 
 Measured: 2,000 requests per second sustained for 30 seconds (after a 10-second warm-up) with 0 failed,
-0 dropped, 95th percentile 65 to 92 ms in three runs, and every accepted reading stored. The HTTP server
+0 dropped, 95th percentile 161 to 210 ms in three runs (hourly buckets), and every accepted reading stored. The HTTP server
 uses a long connection queue (`SERVER_BACKLOG`) and a 65-second keep-alive so clients reuse connections.
 Details: `Backend/loadtests/README.md`.
 
 ## 2. Storage: the Bucket Pattern
 
 One document per GPS reading would create millions of small documents. Readings are grouped into
-**buckets of up to 100** (`BUCKET_MAX_SIZE`).
+**hourly buckets**: one bucket holds the readings of one vehicle for one clock hour (UTC).
+`BUCKET_MAX_SIZE` (default 1,000) is a safety cap, not the normal bucket size.
 
 ```json
 {
   "vehicleId": "TRUCK-01",
   "bucketStartTime": "2026-01-01T12:00:00.000Z",
-  "bucketEndTime": "2026-01-01T12:01:39.000Z",
-  "count": 100,
+  "bucketEndTime": "2026-01-01T12:59:55.000Z",
+  "count": 720,
   "readings": [
     { "timestamp": "2026-01-01T12:00:00.000Z", "location": { "type": "Point", "coordinates": [88.36, 22.57] },
       "speed": 40, "heading": 90, "fuelLevel": 82, "engineTemp": 88, "ignition": true }
   ],
-  "summary": { "minSpeed": 0, "maxSpeed": 72, "sumSpeed": 4010, "avgSpeed": 40.1,
+  "summary": { "minSpeed": 0, "maxSpeed": 72, "sumSpeed": 28872, "avgSpeed": 40.1,
                "minFuelLevel": 81, "maxFuelLevel": 83, "maxEngineTemp": 95 }
 }
 ```
@@ -79,7 +80,8 @@ One document per GPS reading would create millions of small documents. Readings 
 
   `{ vehicleId: 1, bucketStartTime: -1, count: 1 }`
 
-- Measured: about 1 ms per query (95th percentile 1.5 ms), 1 index key and 1 document examined.
+- **Hourly rules:** a reading goes into the open bucket of its own clock hour; the first reading of a new hour starts a new bucket. If a vehicle sends more than `BUCKET_MAX_SIZE` readings in one hour, another bucket is started for the same hour. A late reading is added to the bucket of its own hour. Buckets written by the earlier count-based version stay readable, because history and statistics only use `bucketStartTime`, `bucketEndTime` and `count`.
+- Measured: the open-bucket lookup takes about 1.8 ms on average (95th percentile 2.7 ms), 1 index key and 1 document examined. Target was under 5 ms.
 
 ## 3. Worker threads
 

@@ -60,11 +60,11 @@ Validation: `vehicleId` is 1 to 16 characters (letters, numbers, `-`, `_`); long
 { "vehicleId": "TRUCK-01", "readings": [ { "coordinates": [88.36, 22.57], "speed": 40, "timestamp": "..." } ] }
 ```
 
-At most 5,000 readings. Invalid readings are skipped and counted. Response `201`:
+At most 5,000 readings. Invalid readings are skipped and counted. Readings are grouped by clock hour (UTC): a batch that crosses an hour boundary returns one entry per bucket. Response `201`:
 
 ```json
 { "success": true, "vehicleId": "TRUCK-01", "ingestedCount": 300, "rejectedCount": 0,
-  "buckets": [ { "bucketId": "...", "added": 100, "bucketCount": 100 } ] }
+  "buckets": [ { "bucketId": "...", "added": 300, "bucketCount": 300 } ] }
 ```
 
 The newest reading is also sent to live clients, and every reading is checked against the geofences.

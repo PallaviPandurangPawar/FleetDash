@@ -11,11 +11,17 @@ second so connections are opened gradually, like a real fleet), then holds 2,000
 30 seconds. The achieved rate and the p95 are measured on the steady 30 seconds only. Failed and dropped
 requests are counted over the whole run, including the warm-up.
 
+Results with **hourly buckets** (one bucket per vehicle per clock hour, safety cap 1,000 readings):
+
 | Run | Target rate | Achieved (steady) | p95 | Failed | Dropped | Accepted | Stored in DB | Clean |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 2,000 req/s | 2,000 req/s | 92 ms | 0 (0.0%) | 0 | 70,380 | 70,380 | YES |
-| 2 | 2,000 req/s | 2,000 req/s | 72 ms | 0 (0.0%) | 0 | 70,390 | 70,390 | YES |
-| 3 | 2,000 req/s | 2,000 req/s | 65 ms | 0 (0.0%) | 0 | 70,360 | 70,360 | YES |
+| 1 | 2,000 req/s | 2,000 req/s | 210 ms | 0 (0.0%) | 0 | 70,396 | 70,396 | YES |
+| 2 | 2,000 req/s | 2,000 req/s | 161 ms | 0 (0.0%) | 0 | 70,397 | 70,397 | YES |
+| 3 | 2,000 req/s | 2,000 req/s | 186 ms | 0 (0.0%) | 0 | 70,390 | 70,390 | YES |
+| 4 (k6 started directly) | 2,000 req/s | 2,000 req/s | 163 ms | 0 (0.0%) | 0 | 70,389 | 70,389 | YES |
+
+- A run with 50 vehicles creates 100 buckets (about 2 per vehicle, because the cap of 1,000 is reached within the hour). With 100 readings per bucket it created at least 700.
+- Before hourly buckets (100 readings per bucket) the same test gave a p95 of 65 to 92 ms. Larger buckets cost more per write, so p95 is now higher, but still far below the 500 ms limit.
 
 - Zero data omission: every request answered with 201 is stored in MongoDB (accepted = stored), in all three runs.
 - "Clean" means: full rate reached, nothing dropped by k6, p95 under 500 ms, under 1% failed, accepted = stored.
@@ -42,17 +48,17 @@ k6 script `batch.k6.js`.
 |---|---|---|---|---|
 | 76 | 0 (0.00%) | 65 ms | 22,800 | 22,800 |
 
-## 3. Database query speed (MongoDB bucket pattern)
+## 3. Database query speed (MongoDB hourly buckets)
 
-Script `scripts/benchmarkQueries.js LOAD-001`, 20 runs each, index
-`{ vehicleId: 1, bucketStartTime: -1, count: 1 }`.
+Script `scripts/benchmarkQueries.js LOAD-001`, 20 runs each, after a 2,000 req/s load run, index
+`{ vehicleId: 1, bucketStartTime: -1, count: 1 }`. The vehicle had 2 buckets and 1,362 readings.
 
 | Query | avg | p95 | min |
 |---|---|---|---|
-| Find newest open bucket (used by every ingest) | 1.03 ms | 1.35 ms | 0.67 ms |
-| Latest 5 buckets for a vehicle (history) | 1.04 ms | 1.50 ms | 0.70 ms |
+| Find the open bucket of one clock hour (used by every ingest) | 1.75 ms | 2.67 ms | 1.09 ms |
+| Latest 5 buckets for a vehicle (history) | 1.40 ms | 1.79 ms | 1.10 ms |
 
-`explain('executionStats')`: server execution 1 ms, 1 index key examined, 1 document
+`explain('executionStats')`: server execution 0 ms, 1 index key examined, 1 document
 examined. Target was under 5 ms.
 
 ## How to run

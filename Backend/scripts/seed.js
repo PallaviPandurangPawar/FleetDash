@@ -3,6 +3,8 @@
 //
 //   npm run seed                      10 vehicles (FLEET-001 ...) and 3 sample geofences
 //   node scripts/seed.js --count=50   50 vehicles
+//   node scripts/seed.js --history=24 also add 24 finished hours of sample telemetry (one hourly bucket per
+//                                     vehicle per hour, one reading per minute). Up to 72 hours.
 //   npm run seed:reset                removes ONLY what this script created: vehicles named FLEET-xxx,
 //                                     geofences marked "Seeded sample geofence", and their telemetry and alerts
 //
@@ -19,6 +21,10 @@ const VEHICLE_PREFIX = 'FLEET-';
 const SEED_MARK = 'Seeded sample geofence'; // every geofence made by this script starts its description with this
 const MAX_COUNT = 500;
 const CENTER = { lon: 88.3639, lat: 22.5726 }; // Kolkata
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const READINGS_PER_HOUR = 60; // sample history: one reading per minute
+const MAX_HISTORY_HOURS = 72;
 
 const MAKES = [
   ['Tata', 'Prima'],
@@ -101,6 +107,85 @@ async function insertMissing(Model, docs, key) {
   return { created: result.upsertedCount, existing: docs.length - result.upsertedCount };
 }
 
+// One finished hour of sample telemetry for a vehicle, as ONE hourly bucket: a reading every minute,
+// the vehicle driving a slow loop around its start position. The values depend only on the time, so
+// running the seed again produces exactly the same data.
+function buildHistoryBucket(vehicle, index, hourStartMs) {
+  const [lon, lat] = vehicle.lastKnownLocation.coordinates;
+  const readings = [];
+
+  for (let k = 0; k < READINGS_PER_HOUR; k++) {
+    const t = hourStartMs + k * MINUTE_MS;
+    const angle = t / (10 * MINUTE_MS) + index; // radians: one loop in about 63 minutes
+    readings.push({
+      timestamp: new Date(t),
+      location: {
+        type: 'Point',
+        coordinates: [Number((lon + 0.004 * Math.cos(angle)).toFixed(5)), Number((lat + 0.004 * Math.sin(angle)).toFixed(5))],
+      },
+      speed: Number((25 + 15 * Math.sin(angle * 3)).toFixed(1)),
+      fuelLevel: Number((100 - ((t / MINUTE_MS) % 3000) / 50).toFixed(1)),
+      engineTemp: Number((85 + 5 * Math.sin(angle)).toFixed(1)),
+      batteryVoltage: 12.6,
+      odometerKm: 0,
+      heading: Math.round((((angle * 180) / Math.PI) % 360) + 90) % 360,
+      ignition: true,
+      alerts: [],
+    });
+  }
+
+  const speeds = readings.map((r) => r.speed);
+  const fuels = readings.map((r) => r.fuelLevel);
+  const sumSpeed = speeds.reduce((a, b) => a + b, 0);
+
+  return {
+    vehicleId: vehicle.vehicleId,
+    bucketStartTime: readings[0].timestamp,
+    bucketEndTime: readings[readings.length - 1].timestamp,
+    count: readings.length,
+    maxCount: config.bucketMaxSize,
+    summary: {
+      minSpeed: Math.min(...speeds),
+      maxSpeed: Math.max(...speeds),
+      sumSpeed: Number(sumSpeed.toFixed(1)),
+      avgSpeed: Number((sumSpeed / readings.length).toFixed(2)),
+      minFuelLevel: Math.min(...fuels),
+      maxFuelLevel: Math.max(...fuels),
+      maxEngineTemp: Math.max(...readings.map((r) => r.engineTemp)),
+      totalDistanceKm: 0,
+    },
+    readings,
+  };
+}
+
+// Adds one bucket per vehicle for each of the last `hours` finished clock hours (UTC).
+// An hour that already has a bucket for that vehicle is left exactly as it is.
+async function seedHistory(vehicles, hours, now) {
+  const currentHour = Math.floor(now / HOUR_MS) * HOUR_MS;
+  const operations = [];
+
+  vehicles.forEach((vehicle, index) => {
+    for (let h = hours; h >= 1; h--) {
+      const hourStart = currentHour - h * HOUR_MS;
+      const { vehicleId, ...rest } = buildHistoryBucket(vehicle, index, hourStart);
+      operations.push({
+        updateOne: {
+          filter: { vehicleId, bucketStartTime: { $gte: new Date(hourStart), $lt: new Date(hourStart + HOUR_MS) } },
+          update: { $setOnInsert: rest },
+          upsert: true,
+        },
+      });
+    }
+  });
+
+  let created = 0;
+  for (let i = 0; i < operations.length; i += 500) {
+    const result = await TelemetryBucket.bulkWrite(operations.slice(i, i + 500), { ordered: false });
+    created += result.upsertedCount;
+  }
+  return { created, existing: operations.length - created };
+}
+
 async function removeSeeded() {
   const byVehicle = { vehicleId: { $regex: `^${VEHICLE_PREFIX}` } };
 
@@ -122,7 +207,7 @@ async function removeSeeded() {
 /**
  * Seeds (or, with reset, removes the seeded data). The caller opens and closes the database connection.
  */
-async function runSeed({ count = 10, reset = false } = {}) {
+async function runSeed({ count = 10, reset = false, history = 0, now = Date.now() } = {}) {
   if (reset) return removeSeeded();
 
   const n = Number(count);
@@ -130,13 +215,20 @@ async function runSeed({ count = 10, reset = false } = {}) {
     throw new Error(`count must be a whole number from 1 to ${MAX_COUNT}`);
   }
 
+  const hours = Number(history);
+  if (!Number.isInteger(hours) || hours < 0 || hours > MAX_HISTORY_HOURS) {
+    throw new Error(`history must be a whole number of hours from 0 to ${MAX_HISTORY_HOURS}`);
+  }
+
   const vehicles = Array.from({ length: n }, (_, i) => buildVehicle(i));
   const geofences = buildGeofences(vehicles.map((v) => v.vehicleId));
 
-  return {
+  const result = {
     vehicles: await insertMissing(Vehicle, vehicles, 'vehicleId'),
     geofences: await insertMissing(Geofence, geofences, 'name'),
   };
+  if (hours > 0) result.history = await seedHistory(vehicles, hours, now);
+  return result;
 }
 
 async function main() {
@@ -144,6 +236,8 @@ async function main() {
   const reset = args.includes('--reset');
   const countArg = args.find((a) => a.startsWith('--count='));
   const count = countArg ? countArg.split('=')[1] : 10;
+  const historyArg = args.find((a) => a.startsWith('--history='));
+  const history = historyArg ? historyArg.split('=')[1] : 0;
 
   if (config.nodeEnv === 'production' && !args.includes('--force')) {
     console.error('Refusing to touch the database when NODE_ENV=production. Add --force if you really mean it.');
@@ -154,7 +248,7 @@ async function main() {
     await mongoose.connect(config.mongoUri);
     console.log(`Connected to database "${mongoose.connection.name}"`);
 
-    const result = await runSeed({ count, reset });
+    const result = await runSeed({ count, reset, history });
 
     if (reset) {
       const r = result.removed;
@@ -162,6 +256,9 @@ async function main() {
     } else {
       console.log(`Vehicles:  ${result.vehicles.created} created, ${result.vehicles.existing} already there`);
       console.log(`Geofences: ${result.geofences.created} created, ${result.geofences.existing} already there`);
+      if (result.history) {
+        console.log(`History:   ${result.history.created} hourly buckets created, ${result.history.existing} already there`);
+      }
     }
   } catch (err) {
     console.error(`Seed failed: ${err.message}`);

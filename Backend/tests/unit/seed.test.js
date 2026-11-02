@@ -138,3 +138,59 @@ describe('count validation', () => {
     await expect(runSeed({ count })).rejects.toThrow('count must be a whole number');
   });
 });
+
+
+
+describe('sample history (--history)', () => {
+  const HOUR = 60 * 60 * 1000;
+  const MINUTE = 60 * 1000;
+  const NOW = Date.UTC(2026, 0, 1, 12, 30, 0); // 12:30, so the current hour (12:00) is not finished yet
+  const CURRENT_HOUR = Date.UTC(2026, 0, 1, 12, 0, 0);
+  const bucketsOf = (id) => TelemetryBucket.find({ vehicleId: id }).sort({ bucketStartTime: 1 }).lean();
+
+  beforeAll(async () => {
+    await runSeed({ reset: true });
+  });
+
+  afterAll(async () => {
+    await runSeed({ reset: true });
+  });
+
+  test('adds one hourly bucket per vehicle for each finished hour', async () => {
+    const result = await runSeed({ count: 2, history: 3, now: NOW });
+
+    expect(result.history).toEqual({ created: 6, existing: 0 });
+    const buckets = await bucketsOf('FLEET-001');
+    expect(buckets.map((b) => b.bucketStartTime.getTime())).toEqual([
+      CURRENT_HOUR - 3 * HOUR,
+      CURRENT_HOUR - 2 * HOUR,
+      CURRENT_HOUR - HOUR,
+    ]);
+    buckets.forEach((b) => {
+      expect(b.count).toBe(60);
+      expect(b.readings).toHaveLength(60);
+      expect(b.bucketEndTime.getTime()).toBe(b.bucketStartTime.getTime() + 59 * MINUTE);
+      expect(b.summary.maxSpeed).toBeGreaterThanOrEqual(b.summary.minSpeed);
+    });
+  });
+
+  test('running it again adds nothing', async () => {
+    const result = await runSeed({ count: 2, history: 3, now: NOW });
+
+    expect(result.history).toEqual({ created: 0, existing: 6 });
+    expect(await bucketsOf('FLEET-001')).toHaveLength(3);
+  });
+
+  test('without history no telemetry is created', async () => {
+    await runSeed({ reset: true });
+
+    const result = await runSeed({ count: 2 });
+
+    expect(result.history).toBeUndefined();
+    expect(await TelemetryBucket.countDocuments({ vehicleId: /^FLEET-/ })).toBe(0);
+  });
+
+  test.each([-1, 73, 2.5, 'abc'])('rejects history %p', async (history) => {
+    await expect(runSeed({ count: 2, history })).rejects.toThrow('history must be a whole number');
+  });
+});

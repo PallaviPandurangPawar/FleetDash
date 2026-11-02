@@ -89,7 +89,7 @@ async function startServer(port = config.port) {
   console.log(`====================================================`);
   console.log(`🚀 FleetDash Backend Server listening on port ${serverInstance.address().port}`);
   console.log(`⚡ Worker Threads Pool: ${config.workerPoolSize} threads active`);
-  console.log(`📦 MongoDB Bucket Pattern: max ${config.bucketMaxSize} readings/bucket`);
+  console.log(`📦 MongoDB Bucket Pattern: hourly buckets, safety cap ${config.bucketMaxSize} readings`);
   console.log(`====================================================`);
 
   return serverInstance;

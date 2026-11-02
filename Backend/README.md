@@ -21,7 +21,7 @@ cd Backend
 npm install
 copy .env.example .env      # on Mac/Linux: cp .env.example .env
 npm run dev                 # restarts on file changes
-npm run seed                # optional: 10 sample vehicles and 3 sample geofences
+npm run seed                # optional: 10 sample vehicles and 3 sample geofences (add -- --history=24 for 24 hours of sample telemetry)
 node scripts/simulator.js   # optional: 20 fake trucks driving around Kolkata
 ```
 
@@ -35,7 +35,7 @@ The server listens on `http://localhost:5000`. Check `GET /api/health`.
 | `npm run dev` | Start the server and restart it when files change |
 | `npm test` | Run all tests |
 | `npm run test:coverage` | Run all tests and print a coverage table |
-| `npm run seed` | Add sample vehicles (`FLEET-001`...) and geofences. Safe to run again. Use `node scripts/seed.js --count=50` for more vehicles |
+| `npm run seed` | Add sample vehicles (`FLEET-001`...) and geofences. Safe to run again. Use `node scripts/seed.js --count=50` for more vehicles and `--history=24` for 24 finished hours of sample telemetry (one hourly bucket per vehicle per hour) |
 | `npm run seed:reset` | Remove only the data the seed script created |
 
 Other scripts in `scripts/`: `simulator.js` (fake vehicles), `socketListener.js` (print live messages),
@@ -51,7 +51,7 @@ Other scripts in `scripts/`: `simulator.js` (fake vehicles), `socketListener.js`
 | `REDIS_URL` | redis://127.0.0.1:6379 | Redis connection |
 | `WORKER_POOL_SIZE` | CPU cores (2 to 8) | Worker threads for analytics |
 | `PARSE_POOL_SIZE` | 2 | Worker threads that validate large batches |
-| `BUCKET_MAX_SIZE` | 100 | Readings per bucket document |
+| `BUCKET_MAX_SIZE` | 1000 | Safety cap of readings per hourly bucket (one bucket = one vehicle for one clock hour) |
 | `MAX_BATCH_SIZE` | 5000 | Largest `/ingest-batch` request |
 | `FLUSH_INTERVAL_MS` | 10 | How long readings are grouped before one database write |
 | `BROADCAST_INTERVAL_MS` | 100 | How often live updates are sent to dashboards |
@@ -64,8 +64,11 @@ Other scripts in `scripts/`: `simulator.js` (fake vehicles), `socketListener.js`
 
 ### MongoDB bucket pattern
 One document per GPS reading would create millions of tiny documents. Instead, readings are grouped into
-**buckets of up to 100 readings** (`TelemetryBucket`). Each bucket keeps a ready-made summary (min/max/sum speed,
-fuel, engine temperature), updated with atomic `$push`, `$inc`, `$min` and `$max` operations.
+**hourly buckets** (`TelemetryBucket`): one bucket holds the readings of one vehicle for one clock hour (UTC).
+`BUCKET_MAX_SIZE` is only a safety cap: a vehicle that sends more readings in one hour gets another bucket for
+that hour, so a document never grows too big. A late reading goes into the bucket of its own hour. Buckets
+written by the earlier count-based version stay readable. Each bucket keeps a ready-made summary (min/max/sum
+speed, fuel, engine temperature), updated with atomic `$push`, `$inc`, `$min` and `$max` operations.
 
 One compound index serves both "find the open bucket" and "latest buckets of a vehicle":
 
@@ -73,7 +76,7 @@ One compound index serves both "find the open bucket" and "latest buckets of a v
 { vehicleId: 1, bucketStartTime: -1, count: 1 }
 ```
 
-Measured query time is about 1 ms (see `loadtests/README.md`).
+Measured query time is under 3 ms (about 1.8 ms on average, see `loadtests/README.md`).
 
 ### Ingestion
 1. `validateTelemetry` middleware rejects bad input with a 400: vehicle IDs must be 1 to 16 characters
@@ -170,7 +173,7 @@ share one database, so Jest runs them one after another.
 ## Load testing
 
 k6 scripts are in `loadtests/` and the measured results are in `loadtests/README.md`:
-2,000 requests per second sustained with no lost data, p95 under 100 ms, and bucket queries around 1 ms.
+2,000 requests per second sustained with no lost data, p95 under 250 ms, and bucket queries under 3 ms.
 
 ## Project structure
 
