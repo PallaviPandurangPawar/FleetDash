@@ -8,15 +8,24 @@ const vehicleStateWriter = require('./vehicleStateWriter');
 // Batches with at least this many readings are parsed in a worker thread
 const PARSE_OFFLOAD_THRESHOLD = parseInt(process.env.PARSE_OFFLOAD_THRESHOLD, 10) || 200;
 
+// Hourly buckets: one bucket holds the readings of one vehicle for one clock hour (UTC).
+// config.bucketMaxSize is only a safety cap: when a vehicle sends more readings in one hour than the cap,
+// another bucket is started for the same hour.
+const HOUR_MS = 60 * 60 * 1000;
+const hourStartOf = (timeMs) => Math.floor(timeMs / HOUR_MS) * HOUR_MS;
+const hourRange = (hourMs) => ({ $gte: new Date(hourMs), $lt: new Date(hourMs + HOUR_MS) });
+
 class BucketService {
   constructor() {
-    // vehicleId -> { _id, count } of the bucket that still has room, so a write needs no lookup first
+    // vehicleId -> { _id, count, hour } of the bucket (of that clock hour) that still has room,
+    // so a write needs no lookup first. Only a hint: a wrong guess is caught by the guard in the update.
     this.openBuckets = new Map();
   }
 
   /**
-   * Ingests a single telemetry reading using MongoDB Bucket Pattern.
-   * Atomically appends to an open bucket or creates a new bucket if full.
+   * Ingests a single telemetry reading using the MongoDB hourly bucket pattern.
+   * Atomically appends to the open bucket of the reading's clock hour, or creates a new bucket
+   * (first reading of an hour, or the cap is reached).
    */
   async ingestTelemetry(data) {
     const {
@@ -52,14 +61,25 @@ class BucketService {
 
     const maxCount = config.bucketMaxSize;
 
+    // The open bucket of THIS clock hour. A reading of a new hour finds none and starts a new bucket.
+    const hourMs = hourStartOf(readingTime.getTime());
+
     let bucket = await TelemetryBucket.findOneAndUpdate(
-      { vehicleId, count: { $lt: maxCount } },
+      { vehicleId, bucketStartTime: hourRange(hourMs), count: { $lt: maxCount } },
       {
         $push: { readings: reading },
         $inc: { count: 1, 'summary.sumSpeed': reading.speed },
-        $set: { bucketEndTime: readingTime },
-        $min: { 'summary.minSpeed': reading.speed, 'summary.minFuelLevel': reading.fuelLevel },
-        $max: { 'summary.maxSpeed': reading.speed, 'summary.maxFuelLevel': reading.fuelLevel, 'summary.maxEngineTemp': reading.engineTemp },
+        $min: {
+          bucketStartTime: readingTime,
+          'summary.minSpeed': reading.speed,
+          'summary.minFuelLevel': reading.fuelLevel,
+        },
+        $max: {
+          bucketEndTime: readingTime,
+          'summary.maxSpeed': reading.speed,
+          'summary.maxFuelLevel': reading.fuelLevel,
+          'summary.maxEngineTemp': reading.engineTemp,
+        },
       },
       { new: true, sort: { bucketStartTime: -1 } }
     )
@@ -137,30 +157,40 @@ class BucketService {
   }
 
   /**
-   * The bucket of a vehicle that still has room. Remembered in memory after the first lookup,
-   * so most writes need no lookup at all. A wrong guess is caught by the guard in the update.
+   * The bucket of a vehicle, for one clock hour, that still has room. Remembered in memory after the
+   * first lookup, so most writes need no lookup at all. A wrong guess is caught by the guard in the update.
+   * Buckets written by the old count-based version are found too, when they started inside that hour.
    */
-  async _findOpenBucket(vehicleId, maxCount) {
+  async _findOpenBucket(vehicleId, hourMs, maxCount) {
     const remembered = this.openBuckets.get(vehicleId);
-    if (remembered && remembered.count < maxCount) return remembered;
+    if (remembered && remembered.hour === hourMs && remembered.count < maxCount) return remembered;
 
-    const open = await TelemetryBucket.findOne({ vehicleId, count: { $lt: maxCount } })
+    const open = await TelemetryBucket.findOne({
+      vehicleId,
+      bucketStartTime: hourRange(hourMs),
+      count: { $lt: maxCount },
+    })
       .sort({ bucketStartTime: -1 })
       .select('_id count')
       .lean();
 
-    if (open) this.openBuckets.set(vehicleId, { _id: open._id, count: open.count });
+    if (open) this.openBuckets.set(vehicleId, { _id: open._id, count: open.count, hour: hourMs });
     else this.openBuckets.delete(vehicleId);
     return open;
   }
 
-  _rememberOpenBucket(vehicleId, bucketDoc, maxCount) {
-    if (bucketDoc.count < maxCount) this.openBuckets.set(vehicleId, { _id: bucketDoc._id, count: bucketDoc.count });
-    else this.openBuckets.delete(vehicleId);
+  _rememberOpenBucket(vehicleId, bucketDoc, hourMs, maxCount) {
+    if (bucketDoc.count < maxCount) {
+      this.openBuckets.set(vehicleId, { _id: bucketDoc._id, count: bucketDoc.count, hour: hourMs });
+    } else {
+      this.openBuckets.delete(vehicleId);
+    }
   }
 
   /**
    * Fast batch ingestion: one database write per bucket instead of one per reading.
+   * The readings are split by clock hour; each hour goes into the open bucket of that hour
+   * (a new bucket is started when there is none, or when the safety cap is reached).
    * Large batches are validated and sorted in a worker thread.
    */
   async ingestBatch(vehicleId, readingsList) {
@@ -180,71 +210,86 @@ class BucketService {
     const valid = parsed.valid;
     const rejectedCount = parsed.rejectedCount;
 
+    // Split by clock hour. The readings are sorted oldest first, so every hour's list is sorted too.
+    const hours = new Map(); // hour start (ms) -> readings of that hour
+    for (const r of valid) {
+      const hourMs = hourStartOf(r.timestamp.getTime());
+      if (!hours.has(hourMs)) hours.set(hourMs, []);
+      hours.get(hourMs).push(r);
+    }
+
     const buckets = [];
-    let remaining = valid;
 
-    while (remaining.length > 0) {
-      const open = await this._findOpenBucket(vehicleId, maxCount);
+    for (const [hourMs, hourReadings] of hours) {
+      let remaining = hourReadings;
 
-      let chunk;
-      let bucketDoc;
+      while (remaining.length > 0) {
+        const open = await this._findOpenBucket(vehicleId, hourMs, maxCount);
 
-      if (open) {
-        // Fill the open bucket with as many readings as fit, in ONE write
-        chunk = remaining.slice(0, maxCount - open.count);
-        const s = this._summarize(chunk);
+        let chunk;
+        let bucketDoc;
 
-        bucketDoc = await TelemetryBucket.findOneAndUpdate(
-          { _id: open._id, count: open.count }, // guard: skip if someone else changed it
-          {
-            $push: { readings: { $each: chunk } },
-            $inc: { count: chunk.length, 'summary.sumSpeed': s.sumSpeed },
-            $set: { bucketEndTime: chunk[chunk.length - 1].timestamp },
-            $min: { 'summary.minSpeed': s.minSpeed, 'summary.minFuelLevel': s.minFuel },
-            $max: {
-              'summary.maxSpeed': s.maxSpeed,
-              'summary.maxFuelLevel': s.maxFuel,
-              'summary.maxEngineTemp': s.maxTemp,
+        if (open) {
+          // Fill the open bucket with as many readings as fit, in ONE write
+          chunk = remaining.slice(0, maxCount - open.count);
+          const s = this._summarize(chunk);
+
+          bucketDoc = await TelemetryBucket.findOneAndUpdate(
+            { _id: open._id, count: open.count }, // guard: skip if someone else changed it
+            {
+              $push: { readings: { $each: chunk } },
+              $inc: { count: chunk.length, 'summary.sumSpeed': s.sumSpeed },
+              $min: {
+                bucketStartTime: chunk[0].timestamp, // a late reading can be older than the bucket's first one
+                'summary.minSpeed': s.minSpeed,
+                'summary.minFuelLevel': s.minFuel,
+              },
+              $max: {
+                bucketEndTime: chunk[chunk.length - 1].timestamp,
+                'summary.maxSpeed': s.maxSpeed,
+                'summary.maxFuelLevel': s.maxFuel,
+                'summary.maxEngineTemp': s.maxTemp,
+              },
             },
-          },
-          { new: true }
-        )
-          .select('_id count')
-          .lean();
+            { new: true }
+          )
+            .select('_id count')
+            .lean();
 
-        if (!bucketDoc) {
-          // The bucket changed or was removed behind our back: forget it and look again
-          this.openBuckets.delete(vehicleId);
-          continue;
+          if (!bucketDoc) {
+            // The bucket changed or was removed behind our back: forget it and look again
+            this.openBuckets.delete(vehicleId);
+            continue;
+          }
+        } else {
+          // No open bucket for this hour: create a new one
+          chunk = remaining.slice(0, maxCount);
+          const s = this._summarize(chunk);
+
+          bucketDoc = await TelemetryBucket.create({
+            vehicleId,
+            bucketStartTime: chunk[0].timestamp,
+            bucketEndTime: chunk[chunk.length - 1].timestamp,
+            count: chunk.length,
+            maxCount,
+            summary: {
+              minSpeed: s.minSpeed,
+              maxSpeed: s.maxSpeed,
+              sumSpeed: s.sumSpeed,
+              avgSpeed: Number((s.sumSpeed / chunk.length).toFixed(2)),
+              minFuelLevel: s.minFuel,
+              maxFuelLevel: s.maxFuel,
+              maxEngineTemp: s.maxTemp,
+              totalDistanceKm: 0,
+            },
+            readings: chunk,
+          });
         }
-      } else {
-        // No open bucket: create a new one
-        chunk = remaining.slice(0, maxCount);
-        const s = this._summarize(chunk);
 
-        bucketDoc = await TelemetryBucket.create({
-          vehicleId,
-          bucketStartTime: chunk[0].timestamp,
-          bucketEndTime: chunk[chunk.length - 1].timestamp,
-          count: chunk.length,
-          maxCount,
-          summary: {
-            minSpeed: s.minSpeed,
-            maxSpeed: s.maxSpeed,
-            sumSpeed: s.sumSpeed,
-            avgSpeed: Number((s.sumSpeed / chunk.length).toFixed(2)),
-            minFuelLevel: s.minFuel,
-            maxFuelLevel: s.maxFuel,
-            maxEngineTemp: s.maxTemp,
-            totalDistanceKm: 0,
-          },
-          readings: chunk,
-        });
+        this._rememberOpenBucket(vehicleId, bucketDoc, hourMs, maxCount);
+        remaining = remaining.slice(chunk.length);
+        buckets.push({ bucketId: bucketDoc._id, added: chunk.length, bucketCount: bucketDoc.count });
       }
-
-      this._rememberOpenBucket(vehicleId, bucketDoc, maxCount);
-      remaining = remaining.slice(chunk.length);
-      buckets.push({ bucketId: bucketDoc._id, added: chunk.length, bucketCount: bucketDoc.count });
     }
 
     // The vehicle's latest position is written together with the other vehicles every half second
@@ -261,18 +306,18 @@ class BucketService {
     if (startTime) query.bucketEndTime = { $gte: new Date(startTime) };
     if (endTime) query.bucketStartTime = { $lte: new Date(endTime) };
 
-    const buckets = await TelemetryBucket.find(query)
-      .sort({ bucketStartTime: -1 })
-      .limit(Math.ceil(limit / config.bucketMaxSize) + 2)
-      .lean();
+    const startMs = startTime ? new Date(startTime).getTime() : null;
+    const endMs = endTime ? new Date(endTime).getTime() : null;
 
+    // Buckets are read newest first and reading stops as soon as there are enough readings.
+    // (A bucket can hold few readings, so the number of buckets to read cannot be calculated in advance.)
     const allReadings = [];
-    for (const bucket of buckets) {
+    const cursor = TelemetryBucket.find(query).sort({ bucketStartTime: -1 }).lean().cursor();
+
+    for await (const bucket of cursor) {
       for (const r of bucket.readings) {
         const t = new Date(r.timestamp).getTime();
-        const startCheck = startTime ? t >= new Date(startTime).getTime() : true;
-        const endCheck = endTime ? t <= new Date(endTime).getTime() : true;
-        if (startCheck && endCheck) {
+        if ((startMs === null || t >= startMs) && (endMs === null || t <= endMs)) {
           allReadings.push({
             timestamp: r.timestamp,
             location: r.location,
@@ -286,6 +331,7 @@ class BucketService {
           });
         }
       }
+      if (allReadings.length >= limit) break;
     }
 
     allReadings.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));

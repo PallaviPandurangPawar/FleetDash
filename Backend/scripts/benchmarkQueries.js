@@ -5,6 +5,7 @@ const TelemetryBucket = require('../src/models/TelemetryBucket');
 
 const VEHICLE_ID = process.argv[2] || 'TRK-001';
 const RUNS = 20;
+const HOUR_MS = 60 * 60 * 1000;
 
 async function time(label, fn) {
   await fn(); // warm-up run, not counted
@@ -24,10 +25,29 @@ async function time(label, fn) {
   try {
     await mongoose.connect(config.mongoUri);
 
-    const explain = await TelemetryBucket.find({ vehicleId: VEHICLE_ID, count: { $lt: config.bucketMaxSize } })
+    // Buckets are hourly: the ingest looks for the open bucket of one clock hour.
+    // Use the hour of the vehicle's newest bucket, so the lookup finds something.
+    const newest = await TelemetryBucket.findOne({ vehicleId: VEHICLE_ID })
       .sort({ bucketStartTime: -1 })
-      .limit(1)
-      .explain('executionStats');
+      .select('bucketStartTime')
+      .lean();
+    if (!newest) {
+      console.log(`No buckets found for ${VEHICLE_ID}. Create some data first (for example a load test).`);
+      return;
+    }
+    const hourMs = Math.floor(newest.bucketStartTime.getTime() / HOUR_MS) * HOUR_MS;
+    const thisHour = { $gte: new Date(hourMs), $lt: new Date(hourMs + HOUR_MS) };
+    const openFilter = { vehicleId: VEHICLE_ID, bucketStartTime: thisHour, count: { $lt: config.bucketMaxSize } };
+
+    const [totals] = await TelemetryBucket.aggregate([
+      { $match: { vehicleId: VEHICLE_ID } },
+      { $group: { _id: null, buckets: { $sum: 1 }, readings: { $sum: '$count' } } },
+    ]);
+    console.log(`Vehicle ${VEHICLE_ID}: ${totals.buckets} bucket(s), ${totals.readings} readings, safety cap ${config.bucketMaxSize}`);
+    console.log(`Open-bucket lookup is for the hour starting ${new Date(hourMs).toISOString()}`);
+    console.log('');
+
+    const explain = await TelemetryBucket.find(openFilter).sort({ bucketStartTime: -1 }).limit(1).explain('executionStats');
     const stats = explain.executionStats;
     console.log('--- Server-side execution (explain) ---');
     console.log(`Server execution time: ${stats.executionTimeMillis} ms`);
@@ -35,11 +55,8 @@ async function time(label, fn) {
     console.log('');
 
     console.log(`--- Round-trip timings (${RUNS} runs each) ---`);
-    await time('1. Find newest open bucket (used by ingest)', () =>
-      TelemetryBucket.findOne({ vehicleId: VEHICLE_ID, count: { $lt: config.bucketMaxSize } })
-        .sort({ bucketStartTime: -1 })
-        .select('_id count')
-        .lean()
+    await time('1. Find the open bucket of one clock hour (used by ingest)', () =>
+      TelemetryBucket.findOne(openFilter).sort({ bucketStartTime: -1 }).select('_id count').lean()
     );
     await time('2. Latest 5 buckets for a vehicle (history)', () =>
       TelemetryBucket.find({ vehicleId: VEHICLE_ID })

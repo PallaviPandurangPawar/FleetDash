@@ -306,3 +306,123 @@ describe('the remembered open bucket', () => {
     expect((await bucketsOf(id)).map((b) => b.count)).toEqual([5]);
   });
 });
+
+
+describe('hourly buckets', () => {
+  const HOUR = 60 * 60 * 1000;
+  const MINUTE = 60 * 1000;
+  const at = (ms, extra = {}) => ({
+    coordinates: [88.3, 22.5],
+    speed: 20,
+    timestamp: new Date(ms).toISOString(),
+    ...extra,
+  });
+  const times = (bucket) => bucket.readings.map((r) => r.timestamp.getTime());
+
+  test('single readings of one clock hour share a bucket, the next hour starts a new one', async () => {
+    const id = 'TEST-BS-HOUR1';
+    await bucketService.ingestTelemetry({ vehicleId: id, ...at(BASE + 10 * MINUTE) }); // 12:10:00
+    await bucketService.ingestTelemetry({ vehicleId: id, ...at(BASE + HOUR - 1000) }); // 12:59:59
+    await bucketService.ingestTelemetry({ vehicleId: id, ...at(BASE + HOUR) }); // 13:00:00 is a new hour
+
+    const buckets = await bucketsOf(id);
+    expect(buckets.map((b) => b.count)).toEqual([2, 1]);
+    expect(buckets[0].bucketStartTime.getTime()).toBe(BASE + 10 * MINUTE);
+    expect(buckets[0].bucketEndTime.getTime()).toBe(BASE + HOUR - 1000);
+    expect(buckets[1].bucketStartTime.getTime()).toBe(BASE + HOUR);
+  });
+
+  test('a batch that crosses the hour boundary is split per hour', async () => {
+    const id = 'TEST-BS-HOUR2';
+    const res = await bucketService.ingestBatch(id, [
+      at(BASE + HOUR + 1000),
+      at(BASE + HOUR - 2000),
+      at(BASE + HOUR - 1000),
+      at(BASE + HOUR),
+    ]);
+
+    expect(res.ingestedCount).toBe(4);
+    expect(res.buckets.map((b) => b.added)).toEqual([2, 2]);
+
+    const buckets = await bucketsOf(id);
+    expect(buckets.map((b) => b.count)).toEqual([2, 2]);
+    expect(times(buckets[0])).toEqual([BASE + HOUR - 2000, BASE + HOUR - 1000]);
+    expect(times(buckets[1])).toEqual([BASE + HOUR, BASE + HOUR + 1000]);
+  });
+
+  test('a later batch of the same hour is added to the bucket of that hour', async () => {
+    const id = 'TEST-BS-HOUR3';
+    await bucketService.ingestBatch(id, [at(BASE), at(BASE + 1000)]);
+    await bucketService.ingestBatch(id, [at(BASE + HOUR - 1000)]); // still 12:xx
+    await bucketService.ingestBatch(id, [at(BASE + HOUR)]); // 13:00
+
+    expect((await bucketsOf(id)).map((b) => b.count)).toEqual([3, 1]);
+  });
+
+  test('a late reading goes back into the bucket of its own hour', async () => {
+    const id = 'TEST-BS-LATE';
+    await bucketService.ingestBatch(id, [at(BASE + HOUR), at(BASE + HOUR + 1000)]); // hour 13
+    await bucketService.ingestBatch(id, [at(BASE + 30000)]); // hour 12, arrives late
+    await bucketService.ingestBatch(id, [at(BASE + HOUR + 2000)]); // hour 13 again
+    await bucketService.ingestBatch(id, [at(BASE + 20000)]); // hour 12, older than its first reading
+
+    const buckets = await bucketsOf(id);
+    expect(buckets.map((b) => b.count)).toEqual([2, 3]);
+    expect(buckets[0].bucketStartTime.getTime()).toBe(BASE + 20000); // moved back to the older reading
+    expect(buckets[0].bucketEndTime.getTime()).toBe(BASE + 30000);
+  });
+
+  test('when the cap is reached inside one hour, another bucket is made for the same hour', async () => {
+    const id = 'TEST-BS-CAP';
+    await bucketService.ingestBatch(id, readings(0, MAX + 5));
+
+    const buckets = await bucketsOf(id);
+    expect(buckets.map((b) => b.count)).toEqual([MAX, 5]);
+    for (const b of buckets) {
+      expect(b.bucketStartTime.getTime()).toBeGreaterThanOrEqual(BASE);
+      expect(b.bucketStartTime.getTime()).toBeLessThan(BASE + HOUR);
+    }
+  });
+
+  test('old count-based buckets stay readable and are not changed by a new hour', async () => {
+    const id = 'TEST-BS-LEGACY';
+    const point = { type: 'Point', coordinates: [88.3, 22.5] };
+    // What the old code wrote: a bucket that covers two clock hours (12:30 to 13:10)
+    await TelemetryBucket.create({
+      vehicleId: id,
+      bucketStartTime: new Date(BASE + 30 * MINUTE),
+      bucketEndTime: new Date(BASE + HOUR + 10 * MINUTE),
+      count: 2,
+      maxCount: 100,
+      summary: { minSpeed: 5, maxSpeed: 15, sumSpeed: 20, avgSpeed: 10 },
+      readings: [
+        { timestamp: new Date(BASE + 30 * MINUTE), location: point, speed: 5 },
+        { timestamp: new Date(BASE + HOUR + 10 * MINUTE), location: point, speed: 15 },
+      ],
+    });
+
+    expect((await bucketService.getVehicleReadings(id)).map((r) => r.speed)).toEqual([5, 15]);
+    expect((await bucketService.getBucketStats(id)).totalReadings).toBe(2);
+
+    await bucketService.ingestBatch(id, [at(BASE + 2 * HOUR, { speed: 25 })]); // a new hour
+
+    const buckets = await bucketsOf(id);
+    expect(buckets.map((b) => b.count)).toEqual([2, 1]);
+    expect(buckets[0].readings).toHaveLength(2); // the old bucket is untouched
+    expect((await bucketService.getVehicleReadings(id)).map((r) => r.speed)).toEqual([5, 15, 25]);
+  });
+
+  test('history works over many small buckets (one reading per hour)', async () => {
+    const id = 'TEST-BS-SPARSE';
+    for (let h = 0; h < 6; h++) {
+      await bucketService.ingestBatch(id, [at(BASE + h * HOUR, { speed: h })]);
+    }
+    expect(await bucketsOf(id)).toHaveLength(6);
+
+    const newest = await bucketService.getVehicleReadings(id, null, null, 4);
+    expect(newest.map((r) => r.speed)).toEqual([2, 3, 4, 5]);
+
+    const all = await bucketService.getVehicleReadings(id);
+    expect(all.map((r) => r.speed)).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+});
