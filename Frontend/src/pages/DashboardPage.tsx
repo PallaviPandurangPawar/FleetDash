@@ -4,21 +4,31 @@
 import { useState , useEffect, useMemo } from "react";
 import { useSocket } from "../hooks/useSocket";
 import { useVehicleStream } from "../hooks/useVehicleStream";
-import { DisplayVehicle, Vehicle } from "../types/telemetry";
+import { DisplayVehicle, Vehicle, VehicleUpdate } from "../types/telemetry";
 import { getVehicles } from "../services/api";
 import { DashboardLayout } from "../components/layout/DashboardLayout";
 import Header from "../components/layout/Header";
 import Sidebar from "../components/layout/Sidebar";
 import MapCanvas from "../components/map/MapCanvas";
+import { getMockVehicles, stepMock, USE_MOCK } from "../utils/mockData";
 
 export default function DashBoardPage()
 {
-    const connected = useSocket();
-    const live = useVehicleStream();
-    const [registered , setRegistered ] = useState<Vehicle[]>([]);
+    const socketconnected = useSocket();
+    const socketlive = useVehicleStream();
+    const [registered , setRegistered ] = useState<Vehicle[]>([]);     
+  const [mockLive, setMockLive] = useState<VehicleUpdate[]>([]);
+
+  const connected = USE_MOCK || socketconnected;
+  const mocklive = USE_MOCK ? mockLive : socketlive;
 
       useEffect(() => 
     {
+        if(USE_MOCK){
+             setRegistered(getMockVehicles());
+      const timer = window.setInterval(() => setMockLive(stepMock()), 500);
+      return () => window.clearInterval(timer);
+        }
         getVehicles()
       .then((res: { vehicles: Vehicle[] }) => setRegistered(res.vehicles))
       .catch((err : Error) => console.error('Could not load vehicles:', err));
@@ -41,7 +51,7 @@ export default function DashBoardPage()
                 });
         }
 
-        for(const u of live)
+        for(const u of mocklive)
         {
             const base = byId.get(u.vehicleId);
             byId.set(u.vehicleId , {
@@ -50,13 +60,13 @@ export default function DashBoardPage()
                 driverName: base?.driverName ?? 'Unassigned',
                 status: u.speed > 5 ? 'in_transit' : 'idle',
                 speed: u.speed,
-                fuelLevel: u.fuellevel,
+                fuelLevel: u.fuelLevel,
                 live: true,
             });
         }
          return Array.from(byId.values());
 
-    },[registered , live]);
+    },[registered , mocklive]);
 
     return (
     <DashboardLayout
@@ -64,7 +74,7 @@ export default function DashBoardPage()
         <Header
           connected={connected}
           vehicleCount={rows.length}
-          liveCount={live.length}
+          liveCount={mocklive.length}
         />
       }
       sidebar={<Sidebar vehicles={rows} />}

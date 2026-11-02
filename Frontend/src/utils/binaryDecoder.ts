@@ -45,7 +45,7 @@ export function decodeBatch(data: ArrayBuffer): VehicleUpdate[] {
         timestamp: view.getFloat64(offset + 32, true),
          speed: view.getFloat32(offset + 40, true),
         heading: view.getFloat32(offset + 44, true),
-        fuellevel: view.getFloat32(offset + 48, true),
+        fuelLevel: view.getFloat32(offset + 48, true),
       ignition: view.getUint32(offset + 52, true) === 1,
     });
 

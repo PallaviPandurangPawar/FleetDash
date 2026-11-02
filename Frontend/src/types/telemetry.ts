@@ -31,7 +31,7 @@ export interface VehicleUpdate {
     heading : number;
     timestamp : number;
     speed : number;
-    fuellevel : number;
+    fuelLevel : number;
     ignition : boolean;
 }
 
