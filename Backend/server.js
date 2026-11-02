@@ -7,6 +7,7 @@ const { connectDB, closeDB } = require('./src/config/db');
 const workerPool = require('./src/workers/workerPool');
 const parsePool = require('./src/workers/parsePool');
 const redisService = require('./src/services/redisService');
+const vehicleStateWriter = require('./src/services/vehicleStateWriter');
 const { initSocketServer } = require('./src/sockets/socketServer');
 
 // Routes
@@ -73,9 +74,14 @@ async function startServer(port = config.port) {
   await connectDB();
 
   await new Promise((resolve, reject) => {
-    serverInstance = app.listen(port, resolve);
+    // A long connection queue (backlog) so a burst of new connections is not refused
+    serverInstance = app.listen({ port, backlog: config.serverBacklog }, resolve);
     serverInstance.once('error', reject);
   });
+
+  // Keep idle connections open longer than the default 5 s, so clients reuse them instead of reconnecting
+  serverInstance.keepAliveTimeout = 65000;
+  serverInstance.headersTimeout = 66000;
 
   io = initSocketServer(serverInstance);
   app.set('io', io); // lets the health route report the real-time layer
@@ -106,6 +112,7 @@ function stopServer() {
 
     await workerPool.terminate();
     await parsePool.terminate();
+    await vehicleStateWriter.flush(); // write the last vehicle positions while the database is still open
     await redisService.close();
     await closeDB();
   })();

@@ -10,12 +10,12 @@ without dropping a single data point. Built as an internship project for Infotac
 
 ## Highlights
 
-- **Fast ingestion:** about 1,950 requests per second sustained with no lost data (95th percentile 428 ms)
+- **Fast ingestion:** 2,000 requests per second sustained for 30 s with no lost data and nothing dropped (95th percentile 65 to 92 ms, three clean runs in a row)
 - **Efficient storage:** MongoDB Bucket Pattern (100 readings per document), queries in about 1 ms
 - **Live updates:** Redis Pub/Sub and Socket.io deliver the newest position of every vehicle as one binary message every 100 ms
 - **Geofence alerts:** Turf.js detects enter and exit events and pushes them live
 - **Non-blocking analytics:** trip summary and safety score computed in worker threads
-- **Tested:** 206 automated tests (about 88 percent coverage), run on every push by GitHub Actions
+- **Tested:** 258 automated tests (about 93 percent coverage), run on every push by GitHub Actions
 - **One-command deployment:** Docker Compose with MongoDB, Redis and the backend
 
 ## Tech stack

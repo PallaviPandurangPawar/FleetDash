@@ -24,8 +24,8 @@ Status legend: Done / In progress / Not started. This log covers the backend; th
 | Requirement | Result |
 |---|---|
 | Database index queries under 5 ms | **Done.** About 1 ms average, 95th percentile 1.5 ms, index used (1 key, 1 document examined) |
-| 2,000 requests per second ingestion with zero data omission | **Done.** 59,068 requests in 30 s (about 1,956 per second), 0 failed, 95th percentile 428 ms, 59,068 accepted = 59,068 stored |
-| Comfortable margin | At 1,500 requests per second: 95th percentile 261 ms, 44,575 accepted = 44,575 stored |
+| 2,000 requests per second ingestion with zero data omission | **Done.** 2,000 per second for 30 s after a 10-second warm-up, 0 failed, 0 dropped, 95th percentile 92 ms, 70,380 accepted = 70,380 stored |
+| Repeatable | **Done.** Three clean runs in a row: 95th percentile 92, 72 and 65 ms, accepted = stored every time |
 | Batch ingestion | 22,800 readings sent = 22,800 stored, 95th percentile 65 ms |
 | Frontend ready for Canvas integration | Frontend team |
 
@@ -42,7 +42,7 @@ Details and how to repeat the tests: `Backend/loadtests/README.md`.
 
 ## Week 4: Testing and Deployment (Backend) - Done
 
-- Jest and Supertest: 206 tests in 11 suites (unit and integration), about 88 percent statement coverage, run against a separate test database
+- Jest and Supertest: 258 tests in 18 suites (unit and integration), about 93 percent statement coverage, run against a separate test database
 - Bugs found and fixed by the tests: crashes on `endTime`-only queries, 500 instead of 400 for invalid database input, unsafe paging values, malformed geofence polygons, missed geofence re-entry inside one write group, batch uploads skipping alerts
 - Seed script (`npm run seed`, `seed:reset`) and a rewritten backend README
 - Docker: backend image plus MongoDB and Redis, with health checks (`docker compose up -d --build`)
@@ -54,7 +54,7 @@ Details and how to repeat the tests: `Backend/loadtests/README.md`.
 | Requirement | Result |
 |---|---|
 | Robust data pipeline that parses and routes many concurrent spatial streams | **Done** (see the mid-project results and the architecture document) |
-| Unit test coverage with Jest and Supertest | **Done.** 206 tests, about 88 percent coverage |
+| Unit test coverage with Jest and Supertest | **Done.** 258 tests, about 93 percent coverage |
 | CI/CD pipeline | **Done.** `.github/workflows/ci.yml` |
 | Deployment | **Done.** Docker Compose stack, tested on a PC and in CI |
 | Steady 60 FPS viewport with thousands of live objects | Frontend team |

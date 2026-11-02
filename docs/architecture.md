@@ -17,7 +17,7 @@ blocking the server.
 | Real-time server | Socket.io | Sends live positions and alerts to dashboards |
 | Geofence engine | Turf.js | Detects when vehicles enter or leave zones |
 | Dashboard | React, Canvas API | Live map (frontend team, see `Frontend/README.md`) |
-| Tests | Jest, Supertest | 206 tests, about 88 percent coverage |
+| Tests | Jest, Supertest | 258 tests, about 93 percent coverage |
 | CI and deployment | GitHub Actions, Docker | Automatic checks, one-command stack |
 
 ## Data flow
@@ -48,6 +48,11 @@ blocking the server.
 3. **Large batches** (200 or more readings) are validated and sorted by a small worker pool, off the main thread.
 4. **After storing**, the newest position is published to Redis and every reading is checked against the
    geofences, oldest first. This is the same for `/ingest` and `/ingest-batch`.
+
+Measured: 2,000 requests per second sustained for 30 seconds (after a 10-second warm-up) with 0 failed,
+0 dropped, 95th percentile 65 to 92 ms in three runs, and every accepted reading stored. The HTTP server
+uses a long connection queue (`SERVER_BACKLOG`) and a 65-second keep-alive so clients reuse connections.
+Details: `Backend/loadtests/README.md`.
 
 ## 2. Storage: the Bucket Pattern
 
