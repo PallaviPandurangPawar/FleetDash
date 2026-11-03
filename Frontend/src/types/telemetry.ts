@@ -5,10 +5,10 @@ export interface AlertItem {
     id :string;
     type : 'exit' | 'enter' ;
     vehicleId :string;
-    geofencenName : string;
+    geofenceName : string;
     lon : number;
     lat :number;
-    ocurredAt : number;
+    occurredAt : number;
     acknowledged : boolean;
 }
 
@@ -31,21 +31,26 @@ export interface VehicleUpdate {
     heading : number;
     timestamp : number;
     speed : number;
-    fuellevel : number;
+    fuelLevel : number;
     ignition : boolean;
 }
 
 
-export type VehicleStatus = 'online' | 'offline' | 'active' | 'idle' | 'in_transit' | 'maintenance';
+export type VehicleStatus = 
+ 'offline' |
+  'active' |
+   'idle' |
+'in_transit' |
+'maintenance';
 
 
 export interface Vehicle {
     vehicleId : string;
     plateNumber : string;
     make :string;
-    modal : string;
+    model : string;
     year : number;
-    driverNumber : number;
+    driverName  : string;
     status : VehicleStatus;
     lastKnownLocation : 
     {
@@ -58,7 +63,7 @@ export interface Vehicle {
         fuelLevel : number;
         engineTemp : number;
         batteryVoltage : number;
-        timestamp : number;
+        timestamp : string;
     }
 
 }

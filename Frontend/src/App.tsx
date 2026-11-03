@@ -4,8 +4,6 @@ import { useVehicleStream } from './hooks/useVehicleStream';
 import {DashboardLayout} from './components/layout/DashboardLayout';
 import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
-import {VehicleCard} from './components/vehicles/VehicleCard';
-import  VehicleList  from './components/vehicles/VehicleList';
 import { DisplayVehicle } from './types/telemetry';
 import MapCanvas from './components/map/MapCanvas';
 
