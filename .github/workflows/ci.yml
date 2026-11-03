@@ -122,7 +122,8 @@ jobs:
           docker compose --profile cluster up -d redis-cluster-init
           for i in $(seq 1 60); do
             info=$(docker compose --profile cluster exec -T redis-node-1 redis-cli cluster info || true)
-            if echo "$info" | grep -q 'cluster_state:ok' && echo "$info" | grep -q 'cluster_known_nodes:6'; then
+            replicas=$(docker compose --profile cluster exec -T redis-node-1 redis-cli cluster nodes | grep -c 'slave' || true)
+            if echo "$info" | grep -q 'cluster_state:ok' && echo "$info" | grep -q 'cluster_known_nodes:6' && [ "$replicas" = "3" ]; then
               echo "The cluster is ready"
               exit 0
             fi

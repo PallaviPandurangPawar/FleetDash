@@ -41,15 +41,32 @@ describeCluster('Redis Cluster', () => {
     opened.forEach((client) => client.disconnect());
   });
 
-  test('is healthy: every slot is covered, 3 primaries and 3 replicas', async () => {
-    const info = await cluster.cluster('INFO');
+  test(
+    'is healthy: every slot is covered, 3 primaries and 3 replicas',
+    async () => {
+      const info = await cluster.cluster('INFO');
 
-    expect(info).toMatch(/cluster_state:ok/);
-    expect(info).toMatch(/cluster_slots_assigned:16384/);
-    expect(info).toMatch(/cluster_known_nodes:6/);
-    expect(cluster.nodes('master')).toHaveLength(3);
-    expect(cluster.nodes('slave')).toHaveLength(3);
-  });
+      expect(info).toMatch(/cluster_state:ok/);
+      expect(info).toMatch(/cluster_slots_assigned:16384/);
+      expect(info).toMatch(/cluster_known_nodes:6/);
+
+      // A replica that has just been restarted, or is still copying from its primary, is not in the cluster's slot
+      // list yet. The client learns about it with the next refresh, so wait for that (and refresh) instead of
+      // checking only once.
+      await waitFor(async () => {
+        if (cluster.nodes('master').length === 3 && cluster.nodes('slave').length === 3) return true;
+        await new Promise((resolve) => {
+          cluster.refreshSlotsCache(() => resolve());
+          setTimeout(resolve, 2000);
+        });
+        return false;
+      }, 60000);
+
+      expect(cluster.nodes('master')).toHaveLength(3);
+      expect(cluster.nodes('slave')).toHaveLength(3);
+    },
+    70000
+  );
 
   test('a message published through the cluster client reaches a cluster subscriber', async () => {
     const subscriber = createClient('test-cluster-sub', { enableOfflineQueue: true });

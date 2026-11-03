@@ -111,6 +111,7 @@ describeCluster('Redis Cluster: live updates when a node goes down', () => {
   // Asks every node directly (not through the cluster client) and reads the cluster state from the first one that answers
   async function readCluster() {
     let answering = 0;
+    let unsynced = 0; // replicas that are not yet connected to (and copying from) their primary
     let info = '';
     let nodeList = '';
     for (const address of allNodes) {
@@ -118,6 +119,8 @@ describeCluster('Redis Cluster: live updates when a node goes down', () => {
       try {
         await node.ping();
         answering++;
+        const replication = await node.info('replication');
+        if (/role:slave/.test(replication) && !/master_link_status:up/.test(replication)) unsynced++;
         if (!info) {
           info = await node.cluster('INFO');
           nodeList = await node.cluster('NODES');
@@ -133,6 +136,7 @@ describeCluster('Redis Cluster: live updates when a node goes down', () => {
     const flagsOf = (line) => (line.split(' ')[2] || '').split(',');
     return {
       answering,
+      unsynced,
       state: (/cluster_state:(\w+)/.exec(info) || [])[1] || 'unknown',
       slotsOk: Number((/cluster_slots_ok:(\d+)/.exec(info) || [])[1] || 0),
       primaries: lines.filter((line) => flagsOf(line).includes('master')).length,
@@ -145,7 +149,15 @@ describeCluster('Redis Cluster: live updates when a node goes down', () => {
   async function healed() {
     lastReport = await readCluster();
     const r = lastReport;
-    return r.answering === 6 && r.state === 'ok' && r.slotsOk === 16384 && r.primaries === 3 && r.replicas === 3 && r.failed === 0;
+    return (
+      r.answering === 6 &&
+      r.state === 'ok' &&
+      r.slotsOk === 16384 &&
+      r.primaries === 3 &&
+      r.replicas === 3 &&
+      r.failed === 0 &&
+      r.unsynced === 0
+    );
   }
 
   beforeAll(async () => {
