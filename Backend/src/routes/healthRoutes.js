@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const workerPool = require('../workers/workerPool');
 const redisService = require('../services/redisService');
 
-router.get('/health', (req, res) => {
+router.get('/health', async (req, res) => {
   const dbState =
     mongoose.connection.readyState === 1
       ? 'connected'
@@ -13,6 +13,7 @@ router.get('/health', (req, res) => {
       : 'disconnected';
 
   const io = req.app.get('io'); // set when the real-time server is running
+  const redis = await redisService.getDetails(); // never throws
 
   res.json({
     status: 'ok',
@@ -21,7 +22,9 @@ router.get('/health', (req, res) => {
     database: dbState,
     workerPool: workerPool.getStats(),
     realtime: {
-      redis: redisService.getStatus(),
+      redis: redis.status,
+      redisMode: redis.mode, // "single" or "cluster"
+      ...(redis.cluster && { redisCluster: redis.cluster }), // only in cluster mode
       socketServer: io ? 'running' : 'not started',
       socketClients: io ? io.engine.clientsCount : 0,
     },

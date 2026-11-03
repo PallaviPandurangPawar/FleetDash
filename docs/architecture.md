@@ -13,11 +13,11 @@ blocking the server.
 | Ingestion API | Node.js, Express | Receives and validates readings |
 | Parse and analytics workers | `worker_threads` | Heavy work off the main thread |
 | Database | MongoDB, hourly buckets | One bucket per vehicle per clock hour (safety cap 1,000 readings) |
-| Message broker | Redis Pub/Sub | Separates ingestion from client notification |
+| Message broker | Redis Pub/Sub (one server or a Redis Cluster) | Separates ingestion from client notification |
 | Real-time server | Socket.io | Sends live positions and alerts to dashboards |
 | Geofence engine | Turf.js | Detects when vehicles enter or leave zones |
 | Dashboard | React, Canvas API | Live map (frontend team, see `Frontend/README.md`) |
-| Tests | Jest, Supertest | 272 tests, about 93 percent coverage |
+| Tests | Jest, Supertest | 294 tests, about 91 percent coverage (6 of them need the Redis Cluster) |
 | CI and deployment | GitHub Actions, Docker | Automatic checks, one-command stack |
 
 ## Data flow
@@ -93,6 +93,9 @@ and a worker that crashes is replaced automatically.
 
 - The ingestion code publishes to the Redis channel **`fleet:updates`**; geofence alerts go to **`fleet:alerts`**.
 - Every server instance subscribes to both channels itself, so several instances can run side by side.
+- **Redis mode:** `REDIS_MODE=single` (default) uses one Redis server; `REDIS_MODE=cluster` uses a Redis Cluster through the cluster-aware ioredis client (`config/redis.js`). The cluster passes every published message on to all nodes, so a subscriber on any node receives it, and the code of the publisher and of the Socket.io server is the same in both modes. In cluster mode a failed publish is tried once more, and the second try goes to another primary.
+- **Node failure:** if the node a subscriber is connected to goes down, ioredis moves the subscription to another node on its own. `tests/integration/redisFailover.test.js` checks this on a real cluster: it stops the subscriber's node, stops a primary, and freezes a primary for 12 seconds (longer than the 5-second cluster timeout) so that its replica is promoted. In every case updates must keep arriving, with no gap longer than 15 seconds.
+- **Health:** in cluster mode `GET /api/health` shows `realtime.redisMode` and `realtime.redisCluster` with the cluster state, the number of primaries and replicas, and the role and status of each node.
 - The Socket.io server keeps the **newest position of each vehicle** for 100 ms (`BROADCAST_INTERVAL_MS`),
   then sends all of them to every client as **one binary message** (`vehicles:binary`). If nobody is connected, the updates are dropped.
 - Alerts are rare, so each one is sent immediately as JSON (`geofence:alert`).
@@ -127,7 +130,8 @@ event, never below 10). Position jumps of 100 km or more between two readings ar
 
 - `docker-compose.yml` starts MongoDB 7, Redis 7 and the backend, each with a health check; the backend waits until both databases are healthy.
 - `Backend/Dockerfile`: Node 22 alpine, production dependencies only, runs as a non-root user, health check on `/api/health`.
-- `.github/workflows/ci.yml` runs on every push: (1) all backend tests with real MongoDB and Redis, (2) builds the Docker image, starts the stack and checks the health route and one ingest.
+- Redis Cluster (optional, profile `cluster` of `docker-compose.yml`): 3 primaries and 3 replicas (`redis-node-1` to `redis-node-6`, `redis:7-alpine`) with fixed addresses on a private Docker network (`10.66.77.11` to `10.66.77.16`) and ports 7001 to 7006 on the PC. `redis-cluster-init` creates the cluster once. A backend on the PC reaches the nodes through an address translation (`natMap`, setting `REDIS_CLUSTER_NAT`), because the cluster announces the Docker-internal addresses.
+- `.github/workflows/ci.yml` runs on every push: (1) all backend tests with real MongoDB and Redis, (2) builds the Docker image, starts the stack and checks the health route and one ingest, (3) starts the Redis Cluster and runs the whole test suite against it (`REDIS_MODE=cluster`), including the node-failure tests.
 
 ## 8. Design decisions
 
@@ -136,12 +140,13 @@ event, never below 10). Position jumps of 100 km or more between two readings ar
 | Bucket Pattern instead of one document per reading | Far fewer documents, smaller index, ready-made statistics |
 | Group commit, answer after the write | High write throughput with no accepted reading lost |
 | Redis Pub/Sub between ingestion and Socket.io | Ingestion does not need to know about clients; easy to run more instances |
+| Cluster-aware Redis client with a single/cluster switch | The same code runs against one Redis or a Redis Cluster; Pub/Sub works across all cluster nodes |
 | One binary message per 100 ms | Replaces thousands of small JSON messages; the browser can decode it quickly |
 | Worker threads for parsing and analytics | The Express event loop stays free for requests |
 | Bounding box before Turf.js | Most readings are rejected cheaply |
 
 ## 9. Known limits
 
-- Redis runs as a single instance (also in Docker). The design allows more server instances, but Redis itself is not clustered.
+- Redis is used for the live updates only (Pub/Sub); nothing is stored in it. The Compose cluster is meant for development and tests (fixed addresses, no password, the debug command is enabled for the failover test); a production cluster needs its own security settings.
 - The inside/outside state of each vehicle is kept in memory, so after a server restart the first position of each vehicle is treated as new (no alert).
 - Alerts and the live map assume reasonably correct device clocks; a reading older than one already checked for the same vehicle is not used for geofence state.

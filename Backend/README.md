@@ -48,7 +48,10 @@ Other scripts in `scripts/`: `simulator.js` (fake vehicles), `socketListener.js`
 | `PORT` | 5000 | HTTP port |
 | `NODE_ENV` | development | `development` also puts stack traces into error responses |
 | `MONGODB_URI` | mongodb://localhost:27017/fleetdash | MongoDB connection string |
-| `REDIS_URL` | redis://127.0.0.1:6379 | Redis connection |
+| `REDIS_URL` | redis://127.0.0.1:6379 | Redis connection (single mode) |
+| `REDIS_MODE` | single | `single` (one Redis server) or `cluster` (Redis Cluster) |
+| `REDIS_CLUSTER_NODES` | (empty) | Cluster mode: start nodes as `host:port`, separated by commas. Empty = the Docker Compose cluster on this PC (127.0.0.1, ports 7001 to 7003) |
+| `REDIS_CLUSTER_NAT` | (automatic) | Cluster mode: `docker-host` translates the Docker-internal node addresses to 127.0.0.1:7001 to 7006, `none` does not. Automatic = `docker-host` when `REDIS_CLUSTER_NODES` is empty |
 | `WORKER_POOL_SIZE` | CPU cores (2 to 8) | Worker threads for analytics |
 | `PARSE_POOL_SIZE` | 2 | Worker threads that validate large batches |
 | `BUCKET_MAX_SIZE` | 1000 | Safety cap of readings per hourly bucket (one bucket = one vehicle for one clock hour) |
@@ -90,6 +93,10 @@ Measured query time is under 3 ms (about 1.8 ms on average, see `loadtests/READM
 ### Real-time layer
 Redis pub/sub decouples ingestion from the dashboards. The Socket.io server subscribes to Redis, collects the
 newest position of each vehicle for 100 ms and sends them to all clients as **one binary message**.
+
+With `REDIS_MODE=cluster` the same code runs against a Redis Cluster (cluster-aware ioredis client, `config/redis.js`).
+The cluster passes every published message on to all nodes, so a subscriber on any node receives it. A failed publish
+is tried once more (on another primary). `GET /api/health` then also shows the cluster state and every node.
 
 | Socket event | Payload |
 |---|---|
@@ -167,8 +174,25 @@ Jest and Supertest. The tests use the separate database `fleetdash_test` (set in
 own `TEST-` data, so your normal data is never touched. They need **MongoDB and Redis running**. The test suites
 share one database, so Jest runs them one after another.
 
-- `tests/unit` - validators, binary codec, geofence logic, analytics maths and worker threads, bucket service, seed script
+- `tests/unit` - validators, binary codec, geofence logic, analytics maths and worker threads, bucket service, seed script, Redis settings
 - `tests/integration` - telemetry, vehicles, geofences and alerts, analytics and Socket.io (Redis to client) APIs
+
+### Tests against the Redis Cluster
+
+`tests/integration/redisCluster.test.js` and `redisFailover.test.js` are skipped unless `REDIS_MODE=cluster`. In cluster mode the
+whole suite runs against the cluster. The failover test stops the node a subscriber is connected to, stops a primary, and
+freezes a primary for 12 seconds (longer than the 5-second cluster timeout) so that its replica takes over; live updates must
+keep arriving, with no gap longer than 15 seconds.
+
+```bash
+# in the repository root: start the cluster (Docker Desktop must be running)
+docker compose --profile cluster up -d redis-cluster-init
+
+# in Backend: run all tests against the cluster (Windows)
+set REDIS_MODE=cluster
+npm test
+set REDIS_MODE=
+```
 
 ## Load testing
 
