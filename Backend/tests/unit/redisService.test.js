@@ -1,7 +1,7 @@
 // Backend/tests/unit/redisService.test.js
 // Needs Redis running.
-const { createClient } = require('../../src/config/redis');
-const { CHANNEL, ALERT_CHANNEL, publishVehicleUpdate, publishAlert, getStatus, close } = require('../../src/services/redisService');
+const { createClient, settings } = require('../../src/config/redis');
+const { CHANNEL, ALERT_CHANNEL, publishVehicleUpdate, publishAlert, getStatus, getDetails, close } = require('../../src/services/redisService');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -32,6 +32,18 @@ afterAll(async () => {
 describe('redisService', () => {
   test('reports the connection as ready', () => {
     expect(getStatus()).toBe('ready');
+  });
+
+  test('describes the connection for the health route', async () => {
+    const details = await getDetails();
+
+    expect(details).toMatchObject({ mode: settings.mode, status: 'ready' });
+    if (settings.mode === 'cluster') {
+      expect(details.cluster).toMatchObject({ state: 'ok', primaries: 3, replicas: 3 });
+      expect(details.cluster.nodes).toHaveLength(6);
+    } else {
+      expect(details.cluster).toBeUndefined();
+    }
   });
 
   test('publishes a vehicle update as JSON on its channel', async () => {

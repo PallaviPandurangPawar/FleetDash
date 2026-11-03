@@ -91,3 +91,66 @@ jobs:
       - name: Stop everything
         if: always()
         run: docker compose down -v
+
+
+  backend-tests-cluster:
+    name: Backend tests (Redis Cluster)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: Backend
+    env:
+      REDIS_MODE: cluster
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Start the Redis Cluster (3 primaries and 3 replicas)
+        working-directory: .
+        run: |
+          docker compose --profile cluster up -d redis-cluster-init
+          for i in $(seq 1 60); do
+            info=$(docker compose --profile cluster exec -T redis-node-1 redis-cli cluster info || true)
+            if echo "$info" | grep -q 'cluster_state:ok' && echo "$info" | grep -q 'cluster_known_nodes:6'; then
+              echo "The cluster is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The cluster did not become ready"
+          docker compose --profile cluster logs
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run all the tests against the cluster (including the node-down test)
+        run: npm test
+
+      - name: Show the cluster logs if something failed
+        if: failure()
+        working-directory: .
+        run: docker compose --profile cluster logs
+
+      - name: Stop the cluster
+        if: always()
+        working-directory: .
+        run: docker compose --profile cluster down -v

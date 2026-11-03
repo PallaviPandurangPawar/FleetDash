@@ -5,6 +5,7 @@ const request = require('supertest');
 const { io: connectClient } = require('socket.io-client');
 const { app, startServer, stopServer } = require('../../server');
 const { mongoose } = require('../../src/config/db');
+const { settings } = require('../../src/config/redis');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -45,6 +46,15 @@ describe('starting the server', () => {
       database: 'connected',
       realtime: { redis: 'ready', socketServer: 'running', socketClients: 0 },
     });
+
+    // the health route also tells which Redis mode is used and, for a cluster, how it is doing
+    const { realtime } = await health();
+    expect(realtime.redisMode).toBe(settings.mode);
+    if (settings.mode === 'cluster') {
+      expect(realtime.redisCluster).toMatchObject({ state: 'ok', primaries: 3, replicas: 3 });
+    } else {
+      expect(realtime.redisCluster).toBeUndefined();
+    }
 
     client = connectClient(`http://127.0.0.1:${port}`, { transports: ['websocket'], forceNew: true });
     await new Promise((resolve, reject) => {

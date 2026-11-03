@@ -21,7 +21,7 @@ Some controllers return a short form: `{ "error": "message" }`. The status codes
 { "status": "ok", "timestamp": "...", "service": "FleetDash Backend Engine", "database": "connected",
   "workerPool": { "poolSize": 4, "activeWorkers": 0, "idleWorkers": 4, "pendingTasks": 0, "completedTasks": 0 },
   "uptimeSeconds": 372, "nodeVersion": "v22.23.4", "memoryUsageMB": 141,
-  "realtime": { "redis": "ready", "socketServer": "running", "socketClients": 3 } }
+  "realtime": { "redis": "ready", "redisMode": "single", "socketServer": "running", "socketClients": 3 } }
 ```
 
 ## Vehicles
@@ -204,4 +204,13 @@ socket.on('vehicles:binary', (data) => {
 socket.on('geofence:alert', (alert) => console.log('ALERT', alert.type, alert.vehicleId, alert.geofenceName));
 ```
 
-`realtime.redis` is the state of the Redis publisher (`ready` when healthy, `reconnecting` or `end` otherwise) and `realtime.socketClients` is the number of connected dashboards.
+`realtime.redis` is the state of the Redis publisher (`ready` when healthy, `reconnecting` or `end` otherwise), `realtime.redisMode` is `single` or `cluster`, and `realtime.socketClients` is the number of connected dashboards.
+
+With `REDIS_MODE=cluster` the answer also contains `realtime.redisCluster`: `state` is `ok` when every slot is served (`fail` when not, `unknown` when the cluster could not be asked), and every node has a `role` (`primary` or `replica`) and a `status` (`ok`, `possibly-down`, `fail` or `joining`):
+
+```json
+"realtime": { "redis": "ready", "redisMode": "cluster",
+  "redisCluster": { "state": "ok", "primaries": 3, "replicas": 3,
+    "nodes": [ { "address": "10.66.77.11:6379", "role": "primary", "status": "ok" }, "... 5 more nodes" ] },
+  "socketServer": "running", "socketClients": 3 }
+```

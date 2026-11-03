@@ -15,8 +15,8 @@ without dropping a single data point. Built as an internship project for Infotac
 - **Live updates:** Redis Pub/Sub and Socket.io deliver the newest position of every vehicle as one binary message every 100 ms
 - **Geofence alerts:** Turf.js detects enter and exit events and pushes them live
 - **Non-blocking analytics:** trip summary and safety score computed in worker threads
-- **Tested:** 272 automated tests (about 93 percent coverage), run on every push by GitHub Actions
-- **One-command deployment:** Docker Compose with MongoDB, Redis and the backend
+- **Tested:** 294 automated tests (about 91 percent coverage), run on every push by GitHub Actions, also against a real Redis Cluster
+- **One-command deployment:** Docker Compose with MongoDB, Redis and the backend, plus an optional real Redis Cluster (3 primaries and 3 replicas)
 
 ## Tech stack
 
@@ -43,6 +43,19 @@ docker compose down                                        # stop (add -v to del
 ```
 
 The backend listens on port 5000; MongoDB and Redis are exposed on 27018 and 6380 so they do not clash with local installs.
+
+### Redis Cluster (optional)
+
+A real Redis Cluster (3 primaries and 3 replicas, started in Docker) can be used instead of the single Redis:
+
+```bash
+docker compose --profile cluster up -d redis-cluster-init   # start the 6 nodes and create the cluster
+docker compose exec redis-node-1 redis-cli cluster info     # must show cluster_state:ok
+docker compose --profile cluster down -v                    # stop it and delete its data
+```
+
+Then start the backend with `REDIS_MODE=cluster` (Windows: `set REDIS_MODE=cluster`). The default is `REDIS_MODE=single`.
+See `Backend/README.md` and `docs/architecture.md`.
 
 ### Without Docker
 
@@ -85,6 +98,6 @@ FleetDash/
   Backend/              Node.js API, workers, real-time server, tests, load tests
   Frontend/             React + TypeScript dashboard
   docs/                 architecture, API reference, progress log, diagrams
-  docker-compose.yml    MongoDB + Redis + backend
+  docker-compose.yml    MongoDB + Redis + backend (+ optional Redis Cluster)
   .github/workflows/    CI pipeline
 ```

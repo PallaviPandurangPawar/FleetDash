@@ -9,6 +9,26 @@
 # Host ports: 5000 (backend), 27018 (MongoDB), 6380 (Redis).
 # MongoDB and Redis use different host ports than their defaults, so they do not clash
 # with copies that are already installed on your PC.
+#
+# OPTIONAL: a real Redis Cluster (3 primaries + 3 replicas), in the profile "cluster".
+#
+#   docker compose --profile cluster up -d redis-cluster-init    start the 6 nodes and create the cluster
+#   docker compose --profile cluster ps                          the 6 nodes must be healthy
+#   docker compose exec redis-node-1 redis-cli cluster info      must show cluster_state:ok
+#   docker compose --profile cluster down -v                     stop it and delete its data
+#
+# The nodes have fixed addresses inside the Docker network (10.66.77.11 to .16) and are reachable from
+# your PC on ports 7001 to 7006. Run the backend against it with REDIS_MODE=cluster (see Backend/.env.example).
+
+x-redis-cluster-node: &redis-cluster-node
+  image: redis:7-alpine
+  restart: unless-stopped
+  profiles: ["cluster"]
+  healthcheck:
+    test: ["CMD", "redis-cli", "ping"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
 
 services:
   mongo:
@@ -39,6 +59,92 @@ services:
       timeout: 5s
       retries: 10
 
+  redis-node-1:
+    <<: *redis-cluster-node
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "/data/nodes.conf", "--cluster-node-timeout", "5000", "--cluster-announce-ip", "10.66.77.11", "--appendonly", "yes", "--protected-mode", "no", "--enable-debug-command", "yes"]
+    ports:
+      - "7001:6379"
+    networks:
+      redis_cluster:
+        ipv4_address: 10.66.77.11
+
+  redis-node-2:
+    <<: *redis-cluster-node
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "/data/nodes.conf", "--cluster-node-timeout", "5000", "--cluster-announce-ip", "10.66.77.12", "--appendonly", "yes", "--protected-mode", "no", "--enable-debug-command", "yes"]
+    ports:
+      - "7002:6379"
+    networks:
+      redis_cluster:
+        ipv4_address: 10.66.77.12
+
+  redis-node-3:
+    <<: *redis-cluster-node
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "/data/nodes.conf", "--cluster-node-timeout", "5000", "--cluster-announce-ip", "10.66.77.13", "--appendonly", "yes", "--protected-mode", "no", "--enable-debug-command", "yes"]
+    ports:
+      - "7003:6379"
+    networks:
+      redis_cluster:
+        ipv4_address: 10.66.77.13
+
+  redis-node-4:
+    <<: *redis-cluster-node
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "/data/nodes.conf", "--cluster-node-timeout", "5000", "--cluster-announce-ip", "10.66.77.14", "--appendonly", "yes", "--protected-mode", "no", "--enable-debug-command", "yes"]
+    ports:
+      - "7004:6379"
+    networks:
+      redis_cluster:
+        ipv4_address: 10.66.77.14
+
+  redis-node-5:
+    <<: *redis-cluster-node
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "/data/nodes.conf", "--cluster-node-timeout", "5000", "--cluster-announce-ip", "10.66.77.15", "--appendonly", "yes", "--protected-mode", "no", "--enable-debug-command", "yes"]
+    ports:
+      - "7005:6379"
+    networks:
+      redis_cluster:
+        ipv4_address: 10.66.77.15
+
+  redis-node-6:
+    <<: *redis-cluster-node
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "/data/nodes.conf", "--cluster-node-timeout", "5000", "--cluster-announce-ip", "10.66.77.16", "--appendonly", "yes", "--protected-mode", "no", "--enable-debug-command", "yes"]
+    ports:
+      - "7006:6379"
+    networks:
+      redis_cluster:
+        ipv4_address: 10.66.77.16
+
+  # Runs once: creates the cluster (3 primaries, each with 1 replica) and stops. Running it again does nothing.
+  redis-cluster-init:
+    image: redis:7-alpine
+    profiles: ["cluster"]
+    restart: "no"
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+      redis-node-4:
+        condition: service_healthy
+      redis-node-5:
+        condition: service_healthy
+      redis-node-6:
+        condition: service_healthy
+    networks:
+      - redis_cluster
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        if redis-cli -h 10.66.77.11 cluster info | grep -q 'cluster_state:ok'; then
+        echo "Redis Cluster already exists";
+        else
+        redis-cli --cluster create
+        10.66.77.11:6379 10.66.77.12:6379 10.66.77.13:6379
+        10.66.77.14:6379 10.66.77.15:6379 10.66.77.16:6379
+        --cluster-replicas 1 --cluster-yes;
+        fi
+
   backend:
     build: ./Backend
     restart: unless-stopped
@@ -49,14 +155,27 @@ services:
       PORT: 5000
       MONGODB_URI: mongodb://mongo:27017/fleetdash
       REDIS_URL: redis://redis:6379
+      # Optional: REDIS_MODE=cluster makes the backend use the cluster (start it first, see the top of this file)
+      REDIS_MODE: "${REDIS_MODE:-single}"
+      REDIS_CLUSTER_NODES: "${REDIS_CLUSTER_NODES:-10.66.77.11:6379,10.66.77.12:6379,10.66.77.13:6379}"
       CORS_ORIGIN: "${CORS_ORIGIN:-*}"
       LOG_REQUESTS: "true"
+    # The second network lets the backend reach the cluster nodes
+    networks:
+      - default
+      - redis_cluster
     # Start the backend only after MongoDB and Redis answer
     depends_on:
       mongo:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+networks:
+  redis_cluster:
+    ipam:
+      config:
+        - subnet: 10.66.77.0/24
 
 volumes:
   mongo_data:
