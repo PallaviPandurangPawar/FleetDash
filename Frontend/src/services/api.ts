@@ -8,7 +8,7 @@ import type {
   VehiclesResponse,
 } from '../types/api';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const BASE_URL = import.meta.env.VITE_API_URL;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -21,17 +21,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export const getVehicles = (limit = 500) => 
-  request<VehiclesResponse>(`/Vehicles?limit=${limit}`);
+export const getVehicles = (limit = 500) =>
+  request<VehiclesResponse>(`/vehicles?limit=${limit}`);
 
 
-export const getGeofencs = () =>{
-  request<GeofencesResponse>('/geofence?active=true');
-}
+export const getGeofences = () =>
+  request<GeofencesResponse>('/geofences?active=true');
 
-export const getAlerts = (limit = 50) =>{
-  request<AlertsResponse>(`/alert?limit=${limit}`);
-}
+export const getAlerts = (limit = 50) =>
+  request<AlertsResponse>(`/alerts?limit=${limit}`);
 
 export const getAlertSummary = () => request<AlertSummary>('/alerts/summary');
 
