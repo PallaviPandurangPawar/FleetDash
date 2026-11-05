@@ -21,6 +21,10 @@ export interface DisplayVehicle {
   speed: number;
   fuelLevel: number;
   live: boolean;
+  registered: boolean; // false for a vehicle that only exists in the live stream
+  make?: string;
+  model?: string;
+  year?: number;
 }
 
 
@@ -36,7 +40,7 @@ export interface VehicleUpdate {
 }
 
 
-export type VehicleStatus = 
+export type VehicleStatus =
  'offline' |
   'active' |
    'idle' |
@@ -52,7 +56,7 @@ export interface Vehicle {
     year : number;
     driverName  : string;
     status : VehicleStatus;
-    lastKnownLocation : 
+    lastKnownLocation :
     {
         type : 'Point';
         coordinates : [number , number];

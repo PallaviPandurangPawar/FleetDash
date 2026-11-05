@@ -117,6 +117,17 @@ class SimulatorService {
     };
   }
 
+    /** Drops simulated trucks whose vehicle no longer exists (after a delete, trim or reset). */
+  async dropMissingVehicles() {
+    if (this.trucks.length === 0) return;
+
+    const ids = this.trucks.map((truck) => truck.vehicleId);
+    const existing = await Vehicle.find({ vehicleId: { $in: ids } }, 'vehicleId').lean();
+    const stillThere = new Set(existing.map((doc) => doc.vehicleId));
+
+    this.trucks = this.trucks.filter((truck) => stillThere.has(truck.vehicleId));
+  }
+  
   _move(truck) {
     truck.heading = (truck.heading + (Math.random() - 0.5) * 30 + 360) % 360;
     truck.speed = Math.max(0, Math.min(80, truck.speed + (Math.random() - 0.5) * 10));

@@ -4,16 +4,30 @@
 import { useMemo, useState } from 'react';
 import type { DisplayVehicle, VehicleStatus } from '../../types/telemetry';
 import VehicleList from '../vehicles/VehicleList';
+import AddVehicleForm from '../admin/AddVehicleForm';
+import FleetTools from '../admin/FleetTools';
+import { useAdminKey } from '../../hooks/useAdminKey';
 
 type StatusFilter = VehicleStatus | 'all';
 
 interface Props {
   vehicles: DisplayVehicle[];
+  onVehiclesChanged: () => void;
+  onVehicleDeleted: (vehicleId: string) => void;
+  onVehiclesRemoved: (vehicleIds: string[]) => void;
 }
 
-export default function Sidebar({ vehicles }: Props) {
+export default function Sidebar({
+  vehicles,
+  onVehiclesChanged,
+  onVehicleDeleted,
+  onVehiclesRemoved,
+}: Props) {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const { unlocked } = useAdminKey();
+  const [adding, setAdding] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const filteredVehicles = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -34,6 +48,29 @@ export default function Sidebar({ vehicles }: Props) {
 
   return (
     <aside className="sidebar">
+            {unlocked && (
+        <div className="sidebar-tools">
+          {adding ? (
+            <AddVehicleForm onCreated={onVehiclesChanged} onClose={() => setAdding(false)} />
+          ) : (
+            <div className="tools-row">
+              <button type="button" className="btn" onClick={() => setAdding(true)}>
+                + Add vehicle
+              </button>
+              <button type="button" className="btn" onClick={() => setToolsOpen((open) => !open)}>
+                {toolsOpen ? 'Hide fleet tools' : 'Fleet tools'}
+              </button>
+            </div>
+          )}
+          {!adding && toolsOpen && (
+            <FleetTools
+              vehicles={vehicles}
+              onChanged={onVehiclesChanged}
+              onRemoved={onVehiclesRemoved}
+            />
+          )}
+        </div>
+      )}
       <div className="filters">
         <input
           type="search"
@@ -53,7 +90,11 @@ export default function Sidebar({ vehicles }: Props) {
           <option value="offline">Offline</option>
         </select>
       </div>
-      <VehicleList vehicles={filteredVehicles} />
+      <VehicleList
+        vehicles={filteredVehicles}
+        onVehicleDeleted={onVehicleDeleted}
+        onVehicleChanged={onVehiclesChanged}
+      />
     </aside>
   );
 }

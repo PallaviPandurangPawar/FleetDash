@@ -20,14 +20,14 @@ body { background: var(--bg); color: var(--text); }
 
 
 .layout { display: grid; grid-template-rows: 56px minmax(0,1fr); height: 100%;overflow: hidden; }
-.layout-body { display: grid; grid-template-columns: 340px minmax(0, 1fr); 
+.layout-body { display: grid; grid-template-columns: 340px minmax(0, 1fr);
    grid-template-rows: minmax(0, 1fr);
    min-height: 0; }
 
-.card { 
-   background: var(--panel-2); 
+.card {
+   background: var(--panel-2);
    /*border: 1px solid var(--border); */
-   border-radius: 8px; padding: 10px 12px; 
+   border-radius: 8px; padding: 10px 12px;
 }
 
 .card-top
@@ -42,10 +42,10 @@ body { background: var(--bg); color: var(--text); }
    font-size: 0.8rem;
    color: var(--muted);
 }
-.card-meta 
-{ display: flex; 
+.card-meta
+{ display: flex;
    justify-content: space-between;
-    font-size: 0.8rem; 
+    font-size: 0.8rem;
     color: var(--muted);
 }
 
@@ -166,3 +166,131 @@ body { background: var(--bg); color: var(--text); }
   font-size: 0.8rem;
   color: var(--muted);
 }
+
+
+/* Buttons */
+.btn {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-ghost { background: transparent; }
+
+/* Admin lock (header) */
+.admin { display: inline-flex; align-items: center; gap: 8px; }
+.admin-input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+  width: 180px;
+}
+.admin-on { color: var(--ok); font-size: 0.85rem; font-weight: 600; }
+.admin-error {
+  color: var(--bad);
+  font-size: 0.8rem;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+
+/* Sidebar admin tools and small forms */
+.sidebar-tools {
+  flex-shrink: 0;
+  max-height: 70%;
+  overflow-y: auto;
+  padding: 12px 12px 0;
+}
+.panel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.panel-title { font-weight: 600; font-size: 0.9rem; }
+.panel-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.panel-form input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+.panel-row { display: flex; gap: 8px; }
+.panel-row label { flex: 1; min-width: 0; }
+.panel-actions { display: flex; gap: 8px; }
+.panel-error { color: var(--bad); font-size: 0.8rem; }
+
+
+
+
+/* Vehicle card actions */
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+}
+.card-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.card-confirm { display: flex; gap: 8px; }
+.btn-small { padding: 3px 8px; font-size: 0.75rem; }
+.btn-danger { border-color: var(--bad); color: var(--bad); }
+.btn-danger:hover:not(:disabled) { background: var(--bad); color: #fff; }
+
+
+/* A form shown inside a vehicle card blends into the card */
+.card .panel-form {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+
+/* Fleet tools panel */
+.tools-row { display: flex; gap: 8px; }
+.sidebar-tools .panel-form { margin-top: 8px; }
+.tool-group { display: flex; flex-direction: column; gap: 6px; }
+.tool-label { font-size: 0.75rem; color: var(--muted); }
+.panel-row input { flex: 1; }
+.panel-row .tool-apply { flex: none; }
+.tool-warning {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.78rem;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid var(--bad);
+  border-radius: 6px;
+  padding: 8px;
+}
+.panel-ok { color: var(--ok); font-size: 0.8rem; }
