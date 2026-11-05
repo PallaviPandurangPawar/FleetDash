@@ -2,6 +2,7 @@
 // Admin panel: set the number of sample vehicles, reset the sample data.
 import { useMemo, useState } from 'react';
 import { generateVehicles, resetSampleData } from '../../services/api';
+import SimulatorPanel from './SimulatorPanel';
 import type { DisplayVehicle } from '../../types/telemetry';
 
 interface Props {
@@ -96,6 +97,7 @@ export default function FleetTools({ vehicles, onChanged, onRemoved }: Props) {
   return (
     <div className="panel-form">
       <div className="panel-title">Fleet tools</div>
+      <SimulatorPanel />
 
       <div className="tool-group">
         <span className="tool-label">Sample fleet size (FLEET-001 to FLEET-N)</span>
