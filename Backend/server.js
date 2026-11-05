@@ -8,6 +8,7 @@ const workerPool = require('./src/workers/workerPool');
 const parsePool = require('./src/workers/parsePool');
 const redisService = require('./src/services/redisService');
 const vehicleStateWriter = require('./src/services/vehicleStateWriter');
+const simulatorService = require('./src/services/simulatorService');
 const { initSocketServer } = require('./src/sockets/socketServer');
 
 // Routes
@@ -17,6 +18,7 @@ const telemetryRoutes = require('./src/routes/telemetryRoutes');
 const analyticsRoutes = require('./src/routes/analyticsRoutes');
 const geofenceRoutes = require('./src/routes/geofenceRoutes');
 const alertRoutes = require('./src/routes/alertRoutes');
+const adminRoutes = require('./src/routes/adminRoutes');
 const { errorHandler, notFoundHandler } = require('./src/middlewares/errorHandler');
 
 const app = express();
@@ -59,6 +61,7 @@ app.use('/api/telemetry', telemetryRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/geofences', geofenceRoutes);
 app.use('/api/alerts', alertRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Error Handling
 app.use(notFoundHandler);
@@ -100,6 +103,7 @@ function stopServer() {
   if (stopping) return stopping;
 
   stopping = (async () => {
+    simulatorService.stop(); // no more simulated readings while the server shuts down
     if (io) {
       // Disconnects every client, stops the broadcast timer and the Redis subscription, closes the HTTP server
       await new Promise((resolve) => io.close(resolve));

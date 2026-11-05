@@ -160,6 +160,7 @@ services:
       REDIS_CLUSTER_NODES: "${REDIS_CLUSTER_NODES:-10.66.77.11:6379,10.66.77.12:6379,10.66.77.13:6379}"
       CORS_ORIGIN: "${CORS_ORIGIN:-*}"
       LOG_REQUESTS: "true"
+      ADMIN_API_KEY: "${ADMIN_API_KEY:-}"
     # The second network lets the backend reach the cluster nodes
     networks:
       - default
