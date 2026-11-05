@@ -1,17 +1,17 @@
 // Frontend/src/types/api.ts
-// Week 1: API response types
-import type { Vehicle } from "./telemetry";
+// API response types
+import type { Vehicle } from './telemetry';
 
 export interface Geofence {
-    _id : string;
-    name : string;
-    description : string;
-    polygon : {
-        type : 'Polygon';
-        coordinates : [number , number][][];
-    }
-    vehicleIds : string[];
-    active : boolean;
+  _id: string;
+  name: string;
+  description: string;
+  polygon: {
+    type: 'Polygon';
+    coordinates: [number, number][][];
+  };
+  vehicleIds: string[];
+  active: boolean;
 }
 
 export interface AlertRecord {
@@ -34,18 +34,18 @@ export interface VehiclesResponse {
   vehicles: Vehicle[];
 }
 
-export interface AlertsResponse  {
-    success: boolean;
-    total: number;
-    page : number;
-    totatPages : number;
-    alert : AlertRecord[]; 
+export interface AlertsResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  totalPages: number;
+  alerts: AlertRecord[];
 }
 
 export interface GeofencesResponse {
-    success : boolean;
-    count : number;
-    geofences : Geofence[];
+  success: boolean;
+  count: number;
+  geofences: Geofence[];
 }
 
 export interface AlertSummary {
@@ -54,12 +54,4 @@ export interface AlertSummary {
   unacknowledged: number;
   exits: number;
   enters: number;
-}
-
-export interface AlertsResponse {
-  success: boolean;
-  total: number;
-  page: number;
-  totalPages: number;
-  alerts: AlertRecord[];
 }

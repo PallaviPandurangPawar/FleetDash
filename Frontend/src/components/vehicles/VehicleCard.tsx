@@ -1,28 +1,28 @@
 // Frontend/src/components/vehicles/VehicleCard.tsx
-// Week 1: single vehicle summary
+// Single vehicle summary card
 import { DisplayVehicle } from '../../types/telemetry';
 import StatusBadge from '../common/StatusBadge';
 
 interface Props {
-    vehicle: DisplayVehicle;
+  vehicle: DisplayVehicle;
 }
 
 export function VehicleCard({ vehicle }: Props) {
-    return(
-        <div className="card">
-            <div className="card-top">
-                <span className = "card_id">{vehicle.vehicleId}</span>
-                 <StatusBadge status={vehicle.status} />
-            </div>
+  return (
+    <div className="card">
+      <div className="card-top">
+        <span className="card-id">{vehicle.vehicleId}</span>
+        <StatusBadge status={vehicle.status} />
+      </div>
 
-            <div className = "card-meta">
-                <span>{vehicle.plateNumber}</span>
-                <span>{vehicle.driverName}</span>
-            </div>
-            <div className = "card-meta">
-                <span> Speed : {vehicle.speed.toFixed(0)} km/h</span>
-                <span> Fuel : {vehicle.fuelLevel.toFixed(0)} % </span>
-            </div>
-        </div>
-    );
+      <div className="card-meta">
+        <span>{vehicle.plateNumber}</span>
+        <span>{vehicle.driverName}</span>
+      </div>
+      <div className="card-meta">
+        <span>Speed: {vehicle.speed.toFixed(0)} km/h</span>
+        <span>Fuel: {vehicle.fuelLevel.toFixed(0)} %</span>
+      </div>
+    </div>
+  );
 }
