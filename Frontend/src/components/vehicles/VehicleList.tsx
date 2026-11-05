@@ -8,21 +8,23 @@ const MAX_VISIBLE = 200;
 
 interface Props {
   vehicles: DisplayVehicle[];
+  onVehicleDeleted: (vehicleId: string) => void;
+  onVehicleChanged: () => void;
 }
 
-export default function VehicleList({ vehicles }: Props) {
+export default function VehicleList({ vehicles, onVehicleDeleted, onVehicleChanged }: Props) {
     if(vehicles.length === 0) {
-        return <p>No vehicles available.</p>;
+        return <p className="empty">No vehicles available.</p>;
     }
     const visible = vehicles.slice(0, MAX_VISIBLE);
 
     return (
         <>
-       
+
         <div className="vehicle-list">
-            {visible.map((v) => 
-            
-                <VehicleCard key={v.vehicleId} vehicle={v} />
+            {visible.map((v) =>
+
+                <VehicleCard key={v.vehicleId} vehicle={v} onDeleted={onVehicleDeleted} onChanged={onVehicleChanged} />
             )}
         </div>
             {vehicles.length > MAX_VISIBLE && (

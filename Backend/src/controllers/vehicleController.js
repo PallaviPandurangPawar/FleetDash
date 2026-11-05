@@ -1,6 +1,7 @@
 const Vehicle = require('../models/Vehicle');
 const TelemetryBucket = require('../models/TelemetryBucket');
 const Alert = require('../models/Alert');
+const simulatorService = require('../services/simulatorService');
 
 exports.createVehicle = async (req, res, next) => {
   try {
@@ -111,6 +112,10 @@ exports.deleteVehicle = async (req, res, next) => {
       return res.status(404).json({ error: `Vehicle ${vehicleId} not found` });
     }
 
+
+    // A running simulation must stop driving this vehicle
+    await simulatorService.dropMissingVehicles();
+    
     // Optional clean-up of this vehicle's stored history
     let removed = { telemetryBuckets: 0, alerts: 0 };
     if (deleteHistory) {

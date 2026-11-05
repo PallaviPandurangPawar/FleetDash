@@ -1,6 +1,8 @@
 // Frontend/src/components/layout/Header.tsx
 // Week 1: title, connection status, vehicle count
 
+
+import AdminLock from '../admin/AdminLock';
 interface Props {
   connected: boolean;
   vehicleCount: number;
@@ -18,6 +20,7 @@ export default function Header({ connected, vehicleCount, liveCount }: Props) {
           <span className="dot" style={{ background: connected ? 'var(--ok)' : 'var(--bad)' }} />
           {connected ? 'Connected' : 'Disconnected'}
         </span>
+        <AdminLock />
       </div>
     </header>
   );

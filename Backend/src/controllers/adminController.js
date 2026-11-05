@@ -40,6 +40,7 @@ exports.generateVehicles = async (req, res, next) => {
       if (extraIds.length > 0) {
         const deleted = await Vehicle.deleteMany({ vehicleId: { $in: extraIds } });
         removed = deleted.deletedCount;
+        await simulatorService.dropMissingVehicles();
       }
     }
 
@@ -76,6 +77,7 @@ exports.resetSampleData = async (req, res, next) => {
     }
 
     const { removed } = await runSeed({ reset: true });
+    await simulatorService.dropMissingVehicles();
     const restored = restore ? await runSeed({ count: 10 }) : null;
 
     res.json({ success: true, removed, restored });
