@@ -1,4 +1,6 @@
 const Vehicle = require('../models/Vehicle');
+const TelemetryBucket = require('../models/TelemetryBucket');
+const Alert = require('../models/Alert');
 
 exports.createVehicle = async (req, res, next) => {
   try {
@@ -93,6 +95,33 @@ exports.updateVehicle = async (req, res, next) => {
     }
 
     res.json({ success: true, vehicle });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+exports.deleteVehicle = async (req, res, next) => {
+  try {
+    const { vehicleId } = req.params;
+    const deleteHistory = req.query.deleteHistory === 'true';
+
+    const deleted = await Vehicle.findOneAndDelete({ vehicleId });
+    if (!deleted) {
+      return res.status(404).json({ error: `Vehicle ${vehicleId} not found` });
+    }
+
+    // Optional clean-up of this vehicle's stored history
+    let removed = { telemetryBuckets: 0, alerts: 0 };
+    if (deleteHistory) {
+      const [buckets, alerts] = await Promise.all([
+        TelemetryBucket.deleteMany({ vehicleId }),
+        Alert.deleteMany({ vehicleId }),
+      ]);
+      removed = { telemetryBuckets: buckets.deletedCount, alerts: alerts.deletedCount };
+    }
+
+    res.json({ success: true, deleted: vehicleId, historyDeleted: deleteHistory, removed });
   } catch (error) {
     next(error);
   }

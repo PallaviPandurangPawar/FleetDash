@@ -207,7 +207,7 @@ async function removeSeeded() {
 /**
  * Seeds (or, with reset, removes the seeded data). The caller opens and closes the database connection.
  */
-async function runSeed({ count = 10, reset = false, history = 0, now = Date.now() } = {}) {
+async function runSeed({ count = 10, reset = false, history = 0, withGeofences = true, now = Date.now() } = {}) {
   if (reset) return removeSeeded();
 
   const n = Number(count);
@@ -221,12 +221,13 @@ async function runSeed({ count = 10, reset = false, history = 0, now = Date.now(
   }
 
   const vehicles = Array.from({ length: n }, (_, i) => buildVehicle(i));
-  const geofences = buildGeofences(vehicles.map((v) => v.vehicleId));
+  const result = { vehicles: await insertMissing(Vehicle, vehicles, 'vehicleId') };
 
-  const result = {
-    vehicles: await insertMissing(Vehicle, vehicles, 'vehicleId'),
-    geofences: await insertMissing(Geofence, geofences, 'name'),
-  };
+  // The admin "generate vehicles" API passes withGeofences: false so deleted geofences do not come back
+  if (withGeofences) {
+    const geofences = buildGeofences(vehicles.map((v) => v.vehicleId));
+    result.geofences = await insertMissing(Geofence, geofences, 'name');
+  }
   if (hours > 0) result.history = await seedHistory(vehicles, hours, now);
   return result;
 }
