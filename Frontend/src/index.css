@@ -312,3 +312,93 @@ body { background: var(--bg); color: var(--text); }
   font-size: 0.75rem;
 }
 .sim-on { color: var(--ok); border-color: var(--ok); }
+
+
+/* Map interaction */
+.map-area canvas { cursor: grab; touch-action: none; }
+.map-area canvas:active { cursor: grabbing; }
+.map-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.map-controls .btn { min-width: 40px; }
+
+
+/* ---- Cyber map ---- */
+
+.map-area { overflow: hidden; background: #050b14; }
+.map-area .map-host { position: absolute; inset: 0; z-index: 0; }
+.map-area .map-overlay { position: absolute; inset: 0; z-index: 1; pointer-events: none; cursor: auto; }
+
+/* Scanlines and a dark vignette. They stop above the bottom strip, so Google's logo and copyright stay clear. */
+.map-fx {
+  position: absolute;
+  inset: 0 0 30px 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.5) 100%),
+    repeating-linear-gradient(0deg, rgba(34, 211, 238, 0.035) 0, rgba(34, 211, 238, 0.035) 1px, transparent 1px, transparent 3px);
+}
+
+/* Corner brackets */
+.map-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  z-index: 3;
+  pointer-events: none;
+  border: 2px solid #22d3ee;
+  filter: drop-shadow(0 0 4px #22d3ee);
+}
+.map-corner.tl { top: 8px; left: 8px; border-right: none; border-bottom: none; }
+.map-corner.tr { top: 8px; right: 8px; border-left: none; border-bottom: none; }
+.map-corner.bl { bottom: 38px; left: 8px; border-right: none; border-top: none; }
+.map-corner.br { bottom: 38px; right: 8px; border-left: none; border-top: none; }
+
+.map-area .map-label {
+  z-index: 4;
+  top: 24px;
+  left: 24px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a5f3fc;
+  background: rgba(2, 6, 23, 0.75);
+  border: 1px solid rgba(34, 211, 238, 0.6);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.35);
+}
+
+.map-area .map-controls { z-index: 4; right: 24px; bottom: 46px; }
+.map-area .map-controls .btn {
+  font-family: ui-monospace, Consolas, monospace;
+  color: #a5f3fc;
+  background: rgba(2, 6, 23, 0.75);
+  border-color: rgba(34, 211, 238, 0.6);
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.3);
+}
+.map-area .map-controls .btn:hover { box-shadow: 0 0 14px rgba(34, 211, 238, 0.7); }
+
+/* Messages in the middle of the map (loading, key problems) */
+.map-message {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  max-width: 420px;
+  padding: 12px 16px;
+  text-align: center;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.8rem;
+  color: #a5f3fc;
+  background: rgba(2, 6, 23, 0.85);
+  border: 1px solid rgba(34, 211, 238, 0.6);
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.35);
+}
+.map-message-bad { color: #fca5a5; border-color: #f87171; box-shadow: 0 0 16px rgba(248, 113, 113, 0.4); }
