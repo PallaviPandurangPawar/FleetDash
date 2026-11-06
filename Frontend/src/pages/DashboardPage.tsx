@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useVehicleStream } from '../hooks/useVehicleStream';
 import type { DisplayVehicle, Vehicle } from '../types/telemetry';
-import { getVehicles } from '../services/api';
+import { getGeofences, getVehicles } from '../services/api';
+import type { Geofence } from '../types/api';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
 import Header from '../components/layout/Header';
 import Sidebar from '../components/layout/Sidebar';
@@ -14,6 +15,7 @@ export default function DashboardPage() {
   const live = useVehicleStream();
   const [registered, setRegistered] = useState<Vehicle[]>([]);
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
+  const [geofences, setGeofences] = useState<Geofence[]>([]);
 
   // Loads the registered vehicles again (also used after one is added, edited or deleted)
   const loadVehicles = useCallback(() => {
@@ -26,6 +28,16 @@ export default function DashboardPage() {
     loadVehicles();
   }, [loadVehicles]);
 
+  // Loads the active geofences for the map (also used after the sample data is reset)
+  const loadGeofences = useCallback(() => {
+    getGeofences()
+      .then((res) => setGeofences(res.geofences))
+      .catch((err: Error) => console.error('Could not load geofences:', err));
+  }, []);
+
+  useEffect(() => {
+    loadGeofences();
+  }, [loadGeofences]);
 
   // Called after vehicles were removed: forget their last live updates and reload the list
   const handleRemoved = useCallback(
@@ -37,8 +49,9 @@ export default function DashboardPage() {
         return next;
       });
       loadVehicles();
+      loadGeofences();
     },
-    [loadVehicles]
+    [loadVehicles, loadGeofences]
   );
 
   const handleDeleted = useCallback(
@@ -62,6 +75,8 @@ export default function DashboardPage() {
         make: v.make,
         model: v.model,
         year: v.year,
+        lon: v.lastKnownLocation?.coordinates[0],
+        lat: v.lastKnownLocation?.coordinates[1],
       });
     }
 
@@ -81,6 +96,9 @@ export default function DashboardPage() {
         make: base?.make,
         model: base?.model,
         year: base?.year,
+        lon: u.lon,
+        lat: u.lat,
+        heading: u.heading,
       });
     }
 
@@ -99,7 +117,7 @@ export default function DashboardPage() {
         />
       }
     >
-      <MapCanvas vehicleCount={rows.length} />
+      <MapCanvas vehicles={rows} geofences={geofences} />
     </DashboardLayout>
   );
 }

@@ -25,6 +25,9 @@ export interface DisplayVehicle {
   make?: string;
   model?: string;
   year?: number;
+  lon?: number;
+  lat?: number;
+  heading?: number; // only for vehicles seen in the live stream
 }
 
 
