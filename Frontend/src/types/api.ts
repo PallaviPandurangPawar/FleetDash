@@ -125,3 +125,15 @@ export interface SimulatorOptions {
   intervalMs?: number;
   timeScale?: number;
 }
+
+// What the backend sends over the socket when a vehicle crosses a geofence edge
+export interface GeofenceAlertEvent {
+  id: string;
+  type: 'exit' | 'enter';
+  vehicleId: string;
+  geofenceId: string;
+  geofenceName: string;
+  lon: number;
+  lat: number;
+  occurredAt: string | number;
+}

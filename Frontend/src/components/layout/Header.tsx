@@ -7,9 +7,11 @@ interface Props {
   connected: boolean;
   vehicleCount: number;
   liveCount: number;
+  alertCount: number;
+  onToggleAlerts: () => void;
 }
 
-export default function Header({ connected, vehicleCount, liveCount }: Props) {
+export default function Header({ connected, vehicleCount, liveCount, alertCount, onToggleAlerts }: Props) {
   return (
     <header className="header">
       <h1>FleetDash</h1>
@@ -20,6 +22,10 @@ export default function Header({ connected, vehicleCount, liveCount }: Props) {
           <span className="dot" style={{ background: connected ? 'var(--ok)' : 'var(--bad)' }} />
           {connected ? 'Connected' : 'Disconnected'}
         </span>
+        <button type="button" className="btn" onClick={onToggleAlerts}>
+          Alerts
+          {alertCount > 0 && <span className="alert-badge">{alertCount > 99 ? '99+' : alertCount}</span>}
+        </button>
         <AdminLock />
       </div>
     </header>

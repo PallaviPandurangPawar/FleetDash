@@ -1,21 +1,16 @@
 // Frontend/src/components/map/MapCanvas.tsx
 // Week 1 (static) -> Week 3 (Canvas + rAF): the live map component
 import { useEffect, useRef } from 'react';
-import { vehicleBuffer } from '../../canvas/vehicleBuffer';
-import type { Viewport } from '../../canvas/projection';
-import { drawGrid, drawVehicles } from '../../canvas/renderer';
-import { useAnimationFrame } from '../../hooks/useAnimationFrame';
 
 interface Props {
-    vehicleCount : number ;
+  vehicles: DisplayVehicle[];
+  geofences: Geofence[];
+  drawing: boolean; // true while the user is drawing a new geofence
+  draft: [number, number][]; // the corners placed so far, as [lon, lat]
+  onMapClick: (lon: number, lat: number) => void;
 }
-
-const START = {centerLon : 88.3639 , centerLat : 22.5726 , scale : 9000}; // San Francisco
-
 export default function MapCanvas({ vehicleCount }: Props) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const sizeRef = useRef({ width: 0, height: 0, dpr: 1 });
-
     
         useEffect(() => {
             const canvas = canvasRef.current;
@@ -23,39 +18,67 @@ export default function MapCanvas({ vehicleCount }: Props) {
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
 
-            const resize = (): void => {
-            const dpr = window.devicePixelRatio || 1;
-            const width = canvas.clientWidth;
-            const height = canvas.clientHeight;
-            canvas.width = width * dpr;
-            canvas.height = height * dpr;
-            sizeRef.current = { width, height, dpr };
+            const draw = () : void => {
+                const dpr = window.devicePixelRatio || 1;
+                const { clientWidth : w , clientHeight : h } = canvas;
+                canvas.width = w * dpr;
+                canvas.height = h * dpr;
+                ctx.scale(dpr, dpr);
+               // ctx.clearRect(0, 0, w, h);
+
+               ctx.fillStyle = '#0b1220';
+               ctx.fillRect(0, 0, w, h);
+
+               ctx.strokeStyle = '#1e293b';
+                ctx.lineWidth = 1;
+
+                for(let x = 0 ; x < w ;x += 50)
+                {
+                    ctx.beginPath();
+                    ctx.moveTo(x ,0);
+                    ctx.lineTo(x ,h);
+                    ctx.stroke();
+                }
+                for (let y = 0; y < h; y += 50) 
+                {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(w, y);
+                    ctx.stroke();
+                }
+
             };
 
-            resize();
-             const observer = new ResizeObserver(resize);
+            draw();
+
+            const observer = new ResizeObserver(draw);
+
             observer.observe(canvas);
+
             return () => observer.disconnect();
-        }, []);
+        }, [])
 
-         useAnimationFrame(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-
-    const { width, height, dpr } = sizeRef.current;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const view: Viewport = { ...START, width, height };
-    drawGrid(ctx, width, height);
-    drawVehicles(ctx, vehicleBuffer.values(), view);
-  });
-
-
-         return (
+  return (
     <div className="map-area">
-      <canvas ref={canvasRef} />
-      <div className="map-label">Live map (Canvas) • {vehicleCount} vehicles tracked</div>
+      <div ref={hostRef} className="map-host" />
+      <canvas ref={canvasRef} className="map-overlay" />
+      <div className="map-fx" />
+      <div className="map-corner tl" />
+      <div className="map-corner tr" />
+      <div className="map-corner bl" />
+      <div className="map-corner br" />
+      <div className="map-label">
+        Live map (Canvas) • {vehicles.length} vehicles tracked
+        {placed < vehicles.length ? ` (${vehicles.length - placed} without a position yet)` : ''}
+      </div>
+      {problem && <div className="map-message map-message-bad">{problem}</div>}
+      {!problem && !ready && <div className="map-message">Loading map...</div>}
+      {drawing && (
+        <div className="map-hint">
+          Click the map to place the corners of the geofence ({draft.length} placed)
+        </div>
+      )}
+      <MapControls onZoomIn={() => zoomBy(1)} onZoomOut={() => zoomBy(-1)} onFit={fit} />
     </div>
   );
 }

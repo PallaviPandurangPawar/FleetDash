@@ -44,6 +44,11 @@ docker compose down                                        # stop (add -v to del
 
 The backend listens on port 5000; MongoDB and Redis are exposed on 27018 and 6380 so they do not clash with local installs.
 
+
+To use the dashboard's admin tools (add, edit and delete vehicles, fleet tools, simulator), set an admin key: create a
+file named `.env` next to `docker-compose.yml` with the line `ADMIN_API_KEY=<a long random value>`, then run
+`docker compose up -d --build` again. Without it the admin API stays closed.
+
 ### Redis Cluster (optional)
 
 A real Redis Cluster (3 primaries and 3 replicas, started in Docker) can be used instead of the single Redis:

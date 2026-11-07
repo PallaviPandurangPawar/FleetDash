@@ -62,6 +62,7 @@ Other scripts in `scripts/`: `simulator.js` (fake vehicles), `socketListener.js`
 | `CORS_ORIGIN` | * | Browser origin allowed to connect to Socket.io |
 | `LOG_LEVEL` | info | `debug`, `info`, `warn`, `error` or `silent` |
 | `LOG_REQUESTS` | true | Set to `false` to silence per-request logs (load tests) |
+| `ADMIN_API_KEY` | (empty) | Secret for the admin API (`/api/admin/*` and deleting vehicles), sent in the `x-admin-key` header. Empty = the admin API stays closed (503). Make one with `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`. With Docker Compose, put it in a `.env` file next to `docker-compose.yml` |
 
 ## How it works
 
@@ -136,6 +137,7 @@ All routes start with `/api`. Errors look like `{ "success": false, "error": { "
 - `GET /vehicles?status=&page=&limit=` - list (limit 1 to 500, bad values fall back to defaults)
 - `GET /vehicles/:vehicleId` - one vehicle with its last position and telemetry
 - `PUT /vehicles/:vehicleId` - update details. `vehicleId`, `lastTelemetry` and `lastKnownLocation` cannot be changed here
+- `DELETE /vehicles/:vehicleId?deleteHistory=true` - admin key. Delete a vehicle; its history is kept unless `deleteHistory=true`
 
 ### Telemetry
 - `POST /telemetry/ingest` - one reading:
@@ -158,6 +160,14 @@ All routes start with `/api`. Errors look like `{ "success": false, "error": { "
 - `PATCH /alerts/:id/acknowledge`
 - `POST /alerts/acknowledge-all` - optional `{ "vehicleId": "..." }`
 
+### Admin (needs the `x-admin-key` header)
+- `GET /admin/ping` - check the key
+- `POST /admin/vehicles/generate` - `{ count, trim }`: create (and with `trim`, remove) the sample `FLEET-xxx` vehicles
+- `POST /admin/reset` - `{ confirm: true, restore }`: remove or restore the sample data
+- `POST /admin/simulator/start`, `POST /admin/simulator/stop`, `GET /admin/simulator/status` - the vehicle simulator, which runs inside the server
+
+Details are in [`docs/api.md`](../docs/api.md).
+
 ### Analytics (worker threads)
 - `GET /analytics/trip-summary/:vehicleId?startTime=&endTime=&limit=&speedLimit=80&harshBrakeThreshold=25` - distance, duration, average and top speed, speeding count, harsh braking count, idle time and a safety score (100 minus 2 per speeding reading and 5 per harsh braking, never below 10)
 - `POST /analytics/geofence-check` - `{ "vehicleId": "...", "geofences": [{ "name": "A", "polygon": [[lon, lat], ...] }] }` returns the stored readings that are inside each polygon
@@ -175,7 +185,15 @@ own `TEST-` data, so your normal data is never touched. They need **MongoDB and 
 share one database, so Jest runs them one after another.
 
 - `tests/unit` - validators, binary codec, geofence logic, analytics maths and worker threads, bucket service, seed script, Redis settings
-- `tests/integration` - telemetry, vehicles, geofences and alerts, analytics and Socket.io (Redis to client) APIs
+- `tests/integration` - telemetry, vehicles, geofences and alerts, analytics, the admin API and Socket.io (Redis to client) APIs
+
+Using the Docker Compose containers (MongoDB on port 27018, Redis on 6380)? Point the tests at them first
+(Windows; on Mac and Linux use `export`):
+
+```bat
+set TEST_MONGODB_URI=mongodb://127.0.0.1:27018/fleetdash_test
+set REDIS_URL=redis://127.0.0.1:6380
+```
 
 ### Tests against the Redis Cluster
 
