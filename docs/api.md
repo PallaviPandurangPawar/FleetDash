@@ -11,7 +11,8 @@ Most errors look like this (validation, 404 for unknown routes, database errors)
 ```
 
 Some controllers return a short form: `{ "error": "message" }`. The status codes are:
-`400` bad input, `404` not found, `409` already exists. Database validation errors are returned as 400, never 500.
+`400` bad input, `401` missing or wrong admin key, `404` not found, `409` already exists, `503` admin API not configured.
+Database validation errors are returned as 400, never 500.
 
 ## Health
 
@@ -32,6 +33,8 @@ Some controllers return a short form: `{ "error": "message" }`. The status codes
 | `GET /vehicles?status=&page=&limit=` | List vehicles. `limit` 1 to 500 (default 50); bad values fall back to the defaults. Returns `{ success, total, page, totalPages, vehicles }` |
 | `GET /vehicles/:vehicleId` | One vehicle with its last position and telemetry |
 | `PUT /vehicles/:vehicleId` | Update details. `vehicleId`, `lastTelemetry` and `lastKnownLocation` cannot be changed here |
+
+| `DELETE /vehicles/:vehicleId?deleteHistory=true` | **Admin key.** Delete the vehicle. Its telemetry history and alerts are kept unless `deleteHistory=true`; geofences are not changed. Returns `{ success, deleted, historyDeleted, removed: { telemetryBuckets, alerts } }`, `404` if unknown |
 
 Vehicle status values: `idle`, `in_transit`, `maintenance`, `offline` (set automatically from telemetry: moving = `in_transit`,
 stopped with the engine on = `idle`, stopped with the engine off = `offline`).
@@ -116,6 +119,24 @@ An alert is created when a vehicle crosses a geofence boundary.
 | `GET /alerts/summary` | `{ total, unacknowledged, exits, enters }` |
 | `PATCH /alerts/:id/acknowledge` | Mark one alert as handled. Returns `{ alert }` |
 | `POST /alerts/acknowledge-all` | Body `{ "vehicleId": "..." }` is optional. Returns `{ acknowledged: <number> }` |
+
+## Admin API
+
+These routes need the admin key in the `x-admin-key` header. The key is the server's `ADMIN_API_KEY` setting. Without
+the header, or with a wrong key, the answer is `401`. If the server has no `ADMIN_API_KEY` at all, the admin API stays
+closed and answers `503`. The dashboard's "Unlock admin" button checks a key with `GET /admin/ping`.
+
+| Method and path | What it does |
+|---|---|
+| `GET /admin/ping` | Checks the key. Returns `{ success: true, admin: true }` |
+| `POST /admin/vehicles/generate` | Body `{ "count": 1 to 500, "trim": false }`. Makes sure the sample vehicles `FLEET-001` ... `FLEET-<count>` exist: missing ones are created, existing ones are not changed. With `"trim": true`, sample vehicles numbered above `count` are removed (their history is kept). Other vehicles are never touched, and sample geofences are not re-created. Returns `{ success, requested, created, alreadyThere, removed, totalVehicles }` |
+| `POST /admin/reset` | Body `{ "confirm": true, "restore": false }`. Removes only what the seed script created: the `FLEET-xxx` vehicles with their telemetry and alerts, and the geofences whose description starts with "Seeded sample geofence". With `"restore": true` the default sample data (10 vehicles and 3 geofences) is created again. Returns `{ success, removed: { vehicles, geofences, telemetryBuckets, alerts }, restored }` |
+| `POST /admin/simulator/start` | Body (all optional) `{ "count": 20, "intervalMs": 1000, "timeScale": 10 }`, limits 1 to 500, 250 to 10000 and 1 to 100. Drives the first `count` registered vehicles (sorted by id) around Kolkata and stores their readings. Restarts if it is already running. `409` when no vehicle exists. Returns `{ success, simulator }` |
+| `POST /admin/simulator/stop` | Stops it. The counters stay until the next start |
+| `GET /admin/simulator/status` | `{ success, simulator: { running, vehicles, requested, intervalMs, timeScale, startedAt, sent, failed, lastError } }` |
+
+The simulator runs inside the server. It drops a vehicle when it is deleted, trimmed or reset. After vehicles are added,
+call `start` again to include them.
 
 ## Analytics (worker threads)
 
