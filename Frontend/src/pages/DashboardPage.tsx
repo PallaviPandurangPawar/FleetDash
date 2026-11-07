@@ -9,13 +9,37 @@ import Header from '../components/layout/Header';
 import Sidebar from '../components/layout/Sidebar';
 import MapCanvas from '../components/map/MapCanvas';
 import { vehicleBuffer } from '../canvas/vehicleBuffer';
+import { useAlerts } from '../hooks/useAlerts';
+import AlertsPanel from '../components/alerts/AlertPanel';
+import AlertToasts from '../components/alerts/AlertToast';
 
 export default function DashboardPage() {
   const connected = useSocket();
   const live = useVehicleStream();
+  const alerts = useAlerts();
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const [registered, setRegistered] = useState<Vehicle[]>([]);
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [geofences, setGeofences] = useState<Geofence[]>([]);
+
+
+  // Drawing a new geofence: the map collects the clicked corners
+  const [drawing, setDrawing] = useState(false);
+  const [draft, setDraft] = useState<[number, number][]>([]);
+  const startDrawing = useCallback(() => {
+    setDraft([]);
+    setDrawing(true);
+  }, []);
+  const stopDrawing = useCallback(() => {
+    setDrawing(false);
+    setDraft([]);
+  }, []);
+  const addCorner = useCallback(
+    (lon: number, lat: number) => setDraft((prev) => [...prev, [lon, lat]]),
+    []
+  );
+  const undoCorner = useCallback(() => setDraft((prev) => prev.slice(0, -1)), []);
+  const clearCorners = useCallback(() => setDraft([]), []);
 
   // Loads the registered vehicles again (also used after one is added, edited or deleted)
   const loadVehicles = useCallback(() => {
@@ -107,17 +131,46 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout
-      header={<Header connected={connected} vehicleCount={rows.length} liveCount={rows.filter((row) => row.live).length} />}
+      header={<Header connected={connected} vehicleCount={rows.length} liveCount={rows.filter((row) => row.live).length}
+      alertCount={alerts.unacknowledged}
+      onToggleAlerts={() => setAlertsOpen((open) => !open)} />}
       sidebar={
         <Sidebar
           vehicles={rows}
           onVehiclesChanged={loadVehicles}
           onVehicleDeleted={handleDeleted}
           onVehiclesRemoved={handleRemoved}
+          onGeofencesChanged={loadGeofences}
+          draw={{
+            corners: draft,
+            onStart: startDrawing,
+            onUndo: undoCorner,
+            onClear: clearCorners,
+            onStop: stopDrawing,
+          }}
         />
       }
     >
-      <MapCanvas vehicles={rows} geofences={geofences} />
+      <>
+        <MapCanvas
+          vehicles={rows}
+          geofences={geofences}
+          drawing={drawing}
+          draft={draft}
+          onMapClick={addCorner}
+        />
+        {!alertsOpen && <AlertToasts toasts={alerts.toasts} onDismiss={alerts.dismissToast} />}
+        {alertsOpen && (
+          <AlertsPanel
+            alerts={alerts.alerts}
+            unacknowledged={alerts.unacknowledged}
+            error={alerts.error}
+            onAcknowledge={alerts.acknowledge}
+            onAcknowledgeAll={alerts.acknowledgeAll}
+            onClose={() => setAlertsOpen(false)}
+          />
+        )}
+      </>
     </DashboardLayout>
   );
 }

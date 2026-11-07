@@ -6,6 +6,7 @@ import type {
   AlertSummary,
   DeleteVehicleResult,
   GenerateVehiclesResult,
+  Geofence,
   GeofencesResponse,
   ResetResult,
   SimulatorOptions,
@@ -159,3 +160,30 @@ export const startSimulator = (options: SimulatorOptions = {}) =>
 
 export const stopSimulator = () =>
   sendAsAdmin<SimulatorResponse>('/admin/simulator/stop', { method: 'POST' });
+
+
+// ---- Geofence management ----
+
+// All geofences, including the ones that are switched off (getGeofences returns only the active ones)
+export const getAllGeofences = () => send<GeofencesResponse>('/geofences');
+
+export const setGeofenceActive = (id: string, active: boolean) =>
+  send<{ success: boolean; geofence: Geofence }>(`/geofences/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ active }),
+  });
+
+export const deleteGeofence = (id: string) =>
+  send<{ success: boolean; deleted: string }>(`/geofences/${id}`, { method: 'DELETE' });
+
+
+export const createGeofence = (input: {
+  name: string;
+  description?: string;
+  coordinates: [number, number][][];
+  vehicleIds: string[];
+}) =>
+  send<{ success: boolean; geofence: Geofence }>('/geofences', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });

@@ -84,12 +84,54 @@ function drawVehicles(ctx: CanvasRenderingContext2D, vehicles: DisplayVehicle[],
   ctx.restore();
 }
 
+/** The geofence being drawn right now: a dashed pink outline with numbered corners. */
+function drawDraft(ctx: CanvasRenderingContext2D, points: [number, number][], toScreen: ToScreen): void {
+  if (points.length === 0) return;
+  const PINK = '#f472b6';
+
+  ctx.save();
+  ctx.shadowColor = PINK;
+  ctx.shadowBlur = 10;
+  ctx.strokeStyle = PINK;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+
+  const screen = points.map(([lon, lat]) => toScreen(lon, lat));
+  ctx.beginPath();
+  screen.forEach(([x, y], i) => {
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  if (screen.length >= 3) {
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(244, 114, 182, 0.12)';
+    ctx.fill();
+  }
+  ctx.stroke();
+
+  ctx.setLineDash([]);
+  ctx.font = '11px ui-monospace, Consolas, monospace';
+  ctx.textAlign = 'left';
+  screen.forEach(([x, y], i) => {
+    ctx.fillStyle = PINK;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fbcfe8';
+    ctx.fillText(String(i + 1), x + 8, y - 8);
+  });
+  ctx.restore();
+}
+
 export function drawMap(
   ctx: CanvasRenderingContext2D,
   frame: MapFrame,
   vehicles: DisplayVehicle[],
-  geofences: Geofence[]
+  geofences: Geofence[],
+  draft: [number, number][] = []
 ): void {
   drawGeofences(ctx, geofences, frame.toScreen);
   drawVehicles(ctx, vehicles, frame);
+  drawDraft(ctx, draft, frame.toScreen);
 }
+
