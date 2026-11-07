@@ -11,6 +11,9 @@ import MapControls from './MapControls';
 interface Props {
   vehicles: DisplayVehicle[];
   geofences: Geofence[];
+  drawing: boolean; // true while the user is drawing a new geofence
+  draft: [number, number][]; // the corners placed so far, as [lon, lat]
+  onMapClick: (lon: number, lat: number) => void;
 }
 
 const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -18,7 +21,7 @@ const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const AUTH_FAILURE_TEXT =
   'Google rejected the API key. Check that billing is on, that the Maps JavaScript API is enabled, and that the key allows http://localhost:5173/*';
 
-export default function MapCanvas({ vehicles, geofences }: Props) {
+export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapClick }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -29,8 +32,11 @@ export default function MapCanvas({ vehicles, geofences }: Props) {
   );
 
   // The newest data, readable from the map's event handlers
-  const dataRef = useRef({ vehicles, geofences });
-  dataRef.current = { vehicles, geofences };
+  const dataRef = useRef({ vehicles, geofences, draft });
+  dataRef.current = { vehicles, geofences, draft };
+
+  const clickRef = useRef(onMapClick);
+  clickRef.current = onMapClick;
 
   const placed = vehicles.filter(hasPosition).length;
 
@@ -72,7 +78,8 @@ export default function MapCanvas({ vehicles, geofences }: Props) {
         },
       },
       dataRef.current.vehicles,
-      dataRef.current.geofences
+      dataRef.current.geofences,
+      dataRef.current.draft
     );
   }, []);
 
@@ -130,7 +137,7 @@ export default function MapCanvas({ vehicles, geofences }: Props) {
   // Draw again when the data changes or the box is resized
   useEffect(() => {
     redraw();
-  }, [vehicles, geofences, redraw]);
+  }, [vehicles, geofences, draft, redraw]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -139,6 +146,20 @@ export default function MapCanvas({ vehicles, geofences }: Props) {
     observer.observe(canvas);
     return () => observer.disconnect();
   }, [redraw]);
+
+    // While a geofence is being drawn, clicks on the map place its corners
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+
+    map.setOptions({ draggableCursor: drawing ? 'crosshair' : null, disableDoubleClickZoom: drawing });
+    if (!drawing) return;
+
+    const listener = map.addListener('click', (e: google.maps.MapMouseEvent) => {
+      if (e.latLng) clickRef.current(e.latLng.lng(), e.latLng.lat());
+    });
+    return () => listener.remove();
+  }, [drawing, ready]);
 
   // Zoom and move so that every vehicle and geofence is visible
   const fit = useCallback(() => {
@@ -188,6 +209,11 @@ export default function MapCanvas({ vehicles, geofences }: Props) {
       </div>
       {problem && <div className="map-message map-message-bad">{problem}</div>}
       {!problem && !ready && <div className="map-message">Loading map...</div>}
+      {drawing && (
+        <div className="map-hint">
+          Click the map to place the corners of the geofence ({draft.length} placed)
+        </div>
+      )}
       <MapControls onZoomIn={() => zoomBy(1)} onZoomOut={() => zoomBy(-1)} onFit={fit} />
     </div>
   );

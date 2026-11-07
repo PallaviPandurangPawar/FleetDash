@@ -6,6 +6,8 @@ import type { DisplayVehicle, VehicleStatus } from '../../types/telemetry';
 import VehicleList from '../vehicles/VehicleList';
 import AddVehicleForm from '../admin/AddVehicleForm';
 import FleetTools from '../admin/FleetTools';
+import GeofencePanel from '../admin/GeofencePanel';
+import type { DrawControls } from '../admin/GeofencePanel';
 import { useAdminKey } from '../../hooks/useAdminKey';
 
 type StatusFilter = VehicleStatus | 'all';
@@ -15,6 +17,8 @@ interface Props {
   onVehiclesChanged: () => void;
   onVehicleDeleted: (vehicleId: string) => void;
   onVehiclesRemoved: (vehicleIds: string[]) => void;
+  onGeofencesChanged: () => void;
+  draw: DrawControls;
 }
 
 export default function Sidebar({
@@ -22,12 +26,15 @@ export default function Sidebar({
   onVehiclesChanged,
   onVehicleDeleted,
   onVehiclesRemoved,
+  onGeofencesChanged,
+  draw,
 }: Props) {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const { unlocked } = useAdminKey();
   const [adding, setAdding] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [fencesOpen, setFencesOpen] = useState(false);
 
   const filteredVehicles = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -60,6 +67,9 @@ export default function Sidebar({
               <button type="button" className="btn" onClick={() => setToolsOpen((open) => !open)}>
                 {toolsOpen ? 'Hide fleet tools' : 'Fleet tools'}
               </button>
+              <button type="button" className="btn" onClick={() => setFencesOpen((open) => !open)}>
+                {fencesOpen ? 'Hide geofences' : 'Geofences'}
+              </button>
             </div>
           )}
           {!adding && toolsOpen && (
@@ -69,6 +79,7 @@ export default function Sidebar({
               onRemoved={onVehiclesRemoved}
             />
           )}
+          {!adding && fencesOpen && <GeofencePanel onChanged={onGeofencesChanged} draw={draw} />}
         </div>
       )}
       <div className="filters">
