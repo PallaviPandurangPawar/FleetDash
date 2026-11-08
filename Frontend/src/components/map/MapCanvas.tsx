@@ -72,6 +72,7 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
         width,
         height,
         zoom: map.getZoom() ?? 2,
+        time: performance.now(),
         toScreen: (lon, lat) => {
           const point = projection.fromLatLngToContainerPixel(new google.maps.LatLng(lat, lon));
           return point ? [point.x, point.y] : [-9999, -9999];
@@ -162,6 +163,25 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
   }, [drawing, ready]);
 
   // Zoom and move so that every vehicle and geofence is visible
+    // The radar pings need a new frame about 30 times per second while vehicles send live data
+  const hasLive = vehicles.some((v) => v.heading !== undefined);
+  useEffect(() => {
+    if (!hasLive) return;
+
+    let frameId = 0;
+    let last = 0;
+    const tick = (now: number) => {
+      if (now - last >= 33) {
+        last = now;
+        redraw();
+      }
+      frameId = requestAnimationFrame(tick);
+    };
+    frameId = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(frameId);
+  }, [hasLive, redraw]);
+  
   const fit = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;

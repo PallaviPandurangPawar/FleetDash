@@ -6,8 +6,8 @@ import { drawGeofences } from './geofenceLayer';
 import type { ToScreen } from './geofenceLayer';
 
 export const STATUS_COLORS: Record<VehicleStatus, string> = {
-  in_transit: '#22d3ee',
-  active: '#4ade80',
+  in_transit: '#39ff14',
+  active: '#a78bfa',
   idle: '#facc15',
   maintenance: '#e879f9',
   offline: '#64748b',
@@ -15,10 +15,22 @@ export const STATUS_COLORS: Record<VehicleStatus, string> = {
 
 const LABEL_MIN_ZOOM = 13; // vehicle ids are shown only from this map zoom level
 
+const PING_MS = 2000; // one radar ping takes about 2 seconds
+
+// A fixed starting point in the ping cycle per vehicle, so the rings do not all flash at the same moment
+function pingOffset(vehicleId: string): number {
+  let hash = 0;
+  for (let i = 0; i < vehicleId.length; i += 1) {
+    hash = (hash * 31 + vehicleId.charCodeAt(i)) % PING_MS;
+  }
+  return hash;
+}
+
 export interface MapFrame {
   width: number;
   height: number;
   zoom: number;
+  time: number; // milliseconds, drives the radar ping animation
   toScreen: ToScreen;
 }
 
@@ -44,7 +56,7 @@ function drawVehicles(ctx: CanvasRenderingContext2D, vehicles: DisplayVehicle[],
     ctx.shadowColor = color;
     ctx.shadowBlur = 14;
     ctx.fillStyle = color;
-    ctx.strokeStyle = 'rgba(2, 6, 23, 0.9)';
+
 
     ctx.beginPath();
     if (v.heading !== undefined) {
@@ -60,17 +72,19 @@ function drawVehicles(ctx: CanvasRenderingContext2D, vehicles: DisplayVehicle[],
       ctx.arc(x, y, 5, 0, Math.PI * 2);
     }
     ctx.fill();
-    ctx.stroke();
 
     if (v.heading !== undefined) {
-      // A faint ring marks the vehicles that are sending live data
+      // Radar ping for a vehicle that sends live data: a ring grows outward from it and fades, again and again
+      const phase = ((frame.time + pingOffset(v.vehicleId)) % PING_MS) / PING_MS; // 0 at the start, 1 at the end
       ctx.shadowBlur = 0;
       ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.35;
+      ctx.globalAlpha = 0.8 * (1 - phase);
+      ctx.lineWidth = 2 - phase;
       ctx.beginPath();
-      ctx.arc(x, y, 14, 0, Math.PI * 2);
+      ctx.arc(x, y, 8 + phase * 26, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
+      ctx.lineWidth = 1;
     }
 
     if (showLabels) {

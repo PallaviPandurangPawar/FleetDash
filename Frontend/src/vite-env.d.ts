@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="google.maps" />
 
 interface ImportMetaEnv {
     readonly VITE_API_URL: string;
