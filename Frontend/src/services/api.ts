@@ -21,17 +21,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export const getVehicles = (limit = 500) => {
+export const getVehicles = (limit = 500) =>
   request<VehiclesResponse>(`/Vehicles?limit=${limit}`);
-}
 
-export const getGeofencs = () =>{
+export const getGeofencs = () =>
   request<GeofencesResponse>('/geofence?active=true');
-}
 
-export const getAlerts = (limit = 50) =>{
+export const getAlerts = (limit = 50) =>
   request<AlertsResponse>(`/alert?limit=${limit}`);
-}
 
 export const getAlertSummary = () => request<AlertSummary>('/alerts/summary');
 
