@@ -5,7 +5,6 @@ import type { VehicleStatus } from '../../types/telemetry';
 
 // One colour per vehicle status
 const COLORS: Record<VehicleStatus, string> = {
-  online: '#22c55e',
   active: '#22c55e',
   idle: '#eab308',
   in_transit: '#38bdf8',

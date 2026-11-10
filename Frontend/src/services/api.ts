@@ -8,7 +8,7 @@ import type {
   VehiclesResponse,
 } from '../types/api';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/$/, '');
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -21,14 +21,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export const getVehicles = (limit = 500) =>
-  request<VehiclesResponse>(`/Vehicles?limit=${limit}`);
+export const getVehicles = (limit = 500, page = 1) =>
+  request<VehiclesResponse>(`/vehicles?limit=${limit}&page=${page}`);
 
-export const getGeofencs = () =>
-  request<GeofencesResponse>('/geofence?active=true');
+export async function getAllVehicles(limit = 500): Promise<VehiclesResponse> {
+  const firstPage = await getVehicles(limit);
+  const pageNumbers: number[] = [];
+
+  for (let page = 2; page <= firstPage.totalPages; page += 1) {
+    pageNumbers.push(page);
+  }
+
+  const remainingPages: VehiclesResponse[] = [];
+  for (let offset = 0; offset < pageNumbers.length; offset += 4) {
+    const batch = pageNumbers.slice(offset, offset + 4);
+    remainingPages.push(...await Promise.all(batch.map((page) => getVehicles(limit, page))));
+  }
+
+  return {
+    ...firstPage,
+    vehicles: [firstPage, ...remainingPages].flatMap((page) => page.vehicles),
+  };
+}
+
+export const getGeofences = () =>
+  request<GeofencesResponse>('/geofences?active=true');
 
 export const getAlerts = (limit = 50) =>
-  request<AlertsResponse>(`/alert?limit=${limit}`);
+  request<AlertsResponse>(`/alerts?limit=${limit}`);
 
 export const getAlertSummary = () => request<AlertSummary>('/alerts/summary');
 

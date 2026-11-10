@@ -1,46 +1,92 @@
 import MapCanvas from '../components/map/MapCanvas';
+import type { AlertRecord, AlertSummary, Geofence } from '../types/api';
+import type { DisplayVehicle, VehicleStatus } from '../types/telemetry';
 
 interface Props {
-  vehicleCount: number;
+  vehicles: DisplayVehicle[];
+  geofences: Geofence[];
+  alerts: AlertRecord[];
+  alertSummary: AlertSummary | null;
+  loading: boolean;
   connected: boolean;
+  errors: string[];
+  onAcknowledge: (id: string) => Promise<void>;
 }
 
-const metrics = [
-  { label: 'Total Vehicles', value: '248', delta: '+8.2%', tone: 'cyan' },
-  { label: 'Active Vehicles', value: '186', delta: '+5.1%', tone: 'green' },
-  { label: 'Idle Vehicles', value: '31', delta: '-2.4%', tone: 'amber' },
-  { label: 'Offline Vehicles', value: '14', delta: '-1.1%', tone: 'slate' },
-  { label: 'Vehicles in Motion', value: '137', delta: '+12.3%', tone: 'blue' },
-  { label: 'Total Distance', value: '18.2k km', delta: '+9.8%', tone: 'violet' },
-  { label: 'Active Alerts', value: '09', delta: '+3', tone: 'red' },
-  { label: 'Fleet Health', value: '94.8%', delta: '+1.7%', tone: 'emerald' },
-];
+const statusNames: Record<VehicleStatus, string> = {
+  active: 'Active',
+  in_transit: 'In transit',
+  idle: 'Idle',
+  offline: 'Offline',
+  maintenance: 'Maintenance',
+};
 
-const statusBreakdown = [
-  { label: 'In motion', value: 67, color: 'var(--primary-strong)' },
-  { label: 'Idle', value: 21, color: 'var(--amber)' },
-  { label: 'Maintenance', value: 8, color: 'var(--slate)' },
-  { label: 'Offline', value: 4, color: 'var(--red)' },
-];
+const statusColors: Record<VehicleStatus, string> = {
+  active: 'var(--emerald)',
+  in_transit: 'var(--primary)',
+  idle: 'var(--amber)',
+  offline: 'var(--red)',
+  maintenance: 'var(--slate)',
+};
 
-const recentAlerts = [
-  { title: 'Geofence breach', vehicle: 'SIM-014', time: '2 min ago', severity: 'High' },
-  { title: 'Overspeeding', vehicle: 'SIM-207', time: '12 min ago', severity: 'Medium' },
-  { title: 'Vehicle offline', vehicle: 'SIM-042', time: '31 min ago', severity: 'Low' },
-  { title: 'Unexpected movement', vehicle: 'SIM-118', time: '1 hr ago', severity: 'High' },
-];
+function formatRelativeTime(value: string | number | null): string {
+  if (value === null) return 'No telemetry';
+  const timestamp = typeof value === 'number' ? value : new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return 'Unknown';
 
-const utilization = [72, 63, 85, 81, 66, 75, 89, 69, 78, 92, 76, 84];
+  const minutes = Math.round((timestamp - Date.now()) / 60_000);
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  if (Math.abs(minutes) < 60) return formatter.format(minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return formatter.format(hours, 'hour');
+  return formatter.format(Math.round(hours / 24), 'day');
+}
 
-const activityRows = [
-  { vehicle: 'SIM-102', route: 'North Hub → Depot 3', status: 'In transit', speed: '64 km/h', distance: '184 km', time: '06:48' },
-  { vehicle: 'SIM-211', route: 'Harbor Zone', status: 'Idle', speed: '0 km/h', distance: '48 km', time: '06:42' },
-  { vehicle: 'SIM-407', route: 'Urban Loop', status: 'Maintenance', speed: '0 km/h', distance: '31 km', time: '06:35' },
-  { vehicle: 'SIM-018', route: 'Retail Corridor', status: 'In transit', speed: '58 km/h', distance: '226 km', time: '06:25' },
-  { vehicle: 'SIM-076', route: 'Cold Chain', status: 'Active', speed: '41 km/h', distance: '172 km', time: '06:12' },
-];
+function formatLocation(location: [number, number] | null): string {
+  if (!location) return 'Location unavailable';
+  return `${location[1].toFixed(4)}, ${location[0].toFixed(4)}`;
+}
 
-export function DashboardPage({ vehicleCount, connected }: Props) {
+export function DashboardPage({
+  vehicles,
+  geofences,
+  alerts,
+  alertSummary,
+  loading,
+  connected,
+  errors,
+  onAcknowledge,
+}: Props) {
+  const total = vehicles.length;
+  const countByStatus = (status: VehicleStatus) => vehicles.filter((vehicle) => vehicle.status === status).length;
+  const inTransit = countByStatus('in_transit');
+  const idle = countByStatus('idle');
+  const offline = countByStatus('offline');
+  const maintenance = countByStatus('maintenance');
+  const active = total - offline - maintenance;
+  const movingVehicles = vehicles.filter((vehicle) => vehicle.speed > 0);
+  const averageSpeed = movingVehicles.length
+    ? Math.round(movingVehicles.reduce((sum, vehicle) => sum + vehicle.speed, 0) / movingVehicles.length)
+    : 0;
+  const availability = total ? Math.round((active / total) * 100) : 0;
+
+  const metrics = [
+    { label: 'Total vehicles', value: total.toLocaleString(), tone: 'cyan' },
+    { label: 'Operational', value: active.toLocaleString(), tone: 'green' },
+    { label: 'In transit', value: inTransit.toLocaleString(), tone: 'blue' },
+    { label: 'Idle', value: idle.toLocaleString(), tone: 'amber' },
+    { label: 'Offline', value: offline.toLocaleString(), tone: 'slate' },
+    { label: 'Unacknowledged alerts', value: (alertSummary?.unacknowledged ?? 0).toLocaleString(), tone: 'red' },
+    { label: 'Active geofences', value: geofences.length.toLocaleString(), tone: 'violet' },
+    { label: 'Fleet availability', value: `${availability}%`, tone: 'emerald' },
+  ];
+
+  const statusBreakdown: VehicleStatus[] = ['in_transit', 'active', 'idle', 'maintenance', 'offline'];
+  const recentAlerts = alerts.slice(0, 5);
+  const speedVehicles = vehicles.filter((vehicle) => vehicle.speed > 0).slice(0, 12);
+  const maxSpeed = Math.max(1, ...speedVehicles.map((vehicle) => vehicle.speed));
+  const recentVehicles = vehicles.slice(0, 6);
+
   return (
     <main className="page-shell">
       <div className="page-header">
@@ -49,10 +95,19 @@ export function DashboardPage({ vehicleCount, connected }: Props) {
           <h1>Fleet command center</h1>
         </div>
         <div className="header-actions">
-          <button type="button" className="secondary-btn">Filters</button>
-          <button type="button" className="primary-btn">Export report</button>
+          <span className={`connection-label ${connected ? 'connected' : 'disconnected'}`}>
+            {connected ? 'Live telemetry connected' : 'Waiting for live connection'}
+          </span>
         </div>
       </div>
+
+      {errors.map((error) => (
+        <div className="data-error" role="alert" key={error}>
+          Could not load backend data: {error}
+        </div>
+      ))}
+
+      {loading && <div className="loading-note" role="status">Loading fleet data…</div>}
 
       <section className="stats-grid">
         {metrics.map((metric) => (
@@ -60,7 +115,6 @@ export function DashboardPage({ vehicleCount, connected }: Props) {
             <div className="stat-label">{metric.label}</div>
             <div className="stat-row">
               <div className="stat-value">{metric.value}</div>
-              <span className="stat-delta">{metric.delta}</span>
             </div>
           </article>
         ))}
@@ -78,37 +132,44 @@ export function DashboardPage({ vehicleCount, connected }: Props) {
               {connected ? 'Connected' : 'Disconnected'}
             </div>
           </div>
-          <MapCanvas vehicleCount={vehicleCount} />
+          <MapCanvas vehicles={vehicles} geofences={geofences} />
         </article>
 
         <aside className="panel status-panel">
           <div className="panel-header compact">
-            <span>Vehicle status distribution</span>
-            <span className="tiny-number">{vehicleCount} total</span>
+            <span>Vehicle status</span>
+            <span className="tiny-number">{total} total</span>
           </div>
 
           <div className="distribution-list">
-            {statusBreakdown.map((status) => (
-              <div key={status.label} className="distribution-item">
-                <div className="distribution-label-row">
-                  <span>{status.label}</span>
-                  <strong>{status.value}%</strong>
+            {statusBreakdown.map((status) => {
+              const count = countByStatus(status);
+              const percentage = total ? Math.round((count / total) * 100) : 0;
+              return (
+                <div key={status} className="distribution-item">
+                  <div className="distribution-label-row">
+                    <span>{statusNames[status]}</span>
+                    <strong>{count} <small>({percentage}%)</small></strong>
+                  </div>
+                  <div className="bar-track">
+                    <span
+                      className="bar-fill"
+                      style={{ width: `${percentage}%`, background: statusColors[status] }}
+                    />
+                  </div>
                 </div>
-                <div className="bar-track">
-                  <span className="bar-fill" style={{ width: `${status.value}%`, background: status.color }} />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mini-metrics">
             <div>
-              <span>Avg speed</span>
-              <strong>46 km/h</strong>
+              <span>Average reported speed</span>
+              <strong>{averageSpeed} km/h</strong>
             </div>
             <div>
-              <span>Utilization</span>
-              <strong>82%</strong>
+              <span>Maintenance</span>
+              <strong>{maintenance}</strong>
             </div>
           </div>
         </aside>
@@ -117,73 +178,105 @@ export function DashboardPage({ vehicleCount, connected }: Props) {
       <section className="detail-grid">
         <article className="panel">
           <div className="panel-header compact">
-            <span>Recent alerts</span>
-            <button type="button" className="link-btn">Manage</button>
+            <span>Recent geofence alerts</span>
+            <span className="tiny-number">{alertSummary?.unacknowledged ?? 0} unacknowledged</span>
           </div>
-          <ul className="alert-list">
-            {recentAlerts.map((alert) => (
-              <li key={`${alert.vehicle}-${alert.title}`}>
-                <div className="alert-bullet" />
-                <div className="alert-copy">
-                  <div className="alert-title-row">
-                    <strong>{alert.title}</strong>
-                    <span className={`severity ${alert.severity.toLowerCase()}`}>{alert.severity}</span>
+          {recentAlerts.length ? (
+            <ul className="alert-list">
+              {recentAlerts.map((alert) => (
+                <li key={alert._id}>
+                  <div className={`alert-bullet ${alert.type}`} />
+                  <div className="alert-copy">
+                    <div className="alert-title-row">
+                      <strong>Geofence {alert.type}</strong>
+                      <span className={`severity ${alert.type === 'exit' ? 'high' : 'low'}`}>
+                        {alert.type === 'exit' ? 'Exit' : 'Entry'}
+                      </span>
+                    </div>
+                    <span>{alert.vehicleId} · {alert.geofenceName}</span>
                   </div>
-                  <span>{alert.vehicle}</span>
-                </div>
-                <time>{alert.time}</time>
-              </li>
-            ))}
-          </ul>
+                  <div className="alert-time-action">
+                    <time>{formatRelativeTime(alert.occurredAt)}</time>
+                    {!alert.acknowledged && (
+                      <button
+                        type="button"
+                        className="ack-alert"
+                        onClick={() => void onAcknowledge(alert._id)}
+                        aria-label={`Acknowledge alert for ${alert.vehicleId}`}
+                      >
+                        Acknowledge
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty">{loading ? 'Loading alerts…' : 'No geofence alerts found.'}</p>
+          )}
         </article>
 
         <article className="panel">
           <div className="panel-header compact">
-            <span>Vehicle utilization</span>
-            <span className="tiny-number">Monthly</span>
+            <span>Live vehicle speeds</span>
+            <span className="tiny-number">Latest telemetry</span>
           </div>
-          <div className="bar-chart" aria-label="Vehicle utilization chart">
-            {utilization.map((value, index) => (
-              <div key={`${value}-${index}`} className="chart-bar-wrap">
-                <span className="chart-bar" style={{ height: `${value}%` }} />
-              </div>
-            ))}
-          </div>
+          {speedVehicles.length ? (
+            <div className="speed-chart">
+              {speedVehicles.map((vehicle) => (
+                <div className="speed-chart-row" key={vehicle.vehicleId}>
+                  <span>{vehicle.vehicleId}</span>
+                  <div className="bar-track">
+                    <span
+                      className="bar-fill chart-bar"
+                      style={{ width: `${Math.max(4, (vehicle.speed / maxSpeed) * 100)}%` }}
+                    />
+                  </div>
+                  <strong>{Math.round(vehicle.speed)} <small>km/h</small></strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">{loading ? 'Loading vehicles…' : 'No speed telemetry available.'}</p>
+          )}
         </article>
       </section>
 
       <section className="panel table-panel">
         <div className="panel-header compact">
           <span>Recent vehicle activity</span>
-          <button type="button" className="link-btn">View all</button>
+          <span className="tiny-number">Showing {recentVehicles.length} of {total}</span>
         </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>Vehicle</th>
-              <th>Route</th>
-              <th>Status</th>
-              <th>Speed</th>
-              <th>Distance</th>
-              <th>Last seen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {activityRows.map((row) => (
-              <tr key={row.vehicle}>
-                <td>{row.vehicle}</td>
-                <td>{row.route}</td>
-                <td><span className="table-status">{row.status}</span></td>
-                <td>{row.speed}</td>
-                <td>{row.distance}</td>
-                <td>{row.time}</td>
+        {recentVehicles.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Vehicle</th>
+                <th>Registration</th>
+                <th>Status</th>
+                <th>Speed</th>
+                <th>Location (lat, lon)</th>
+                <th>Last telemetry</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {recentVehicles.map((vehicle) => (
+                <tr key={vehicle.vehicleId}>
+                  <td>{vehicle.vehicleId}</td>
+                  <td>{vehicle.plateNumber}</td>
+                  <td><span className={`table-status ${vehicle.status}`}>{statusNames[vehicle.status]}</span></td>
+                  <td>{Math.round(vehicle.speed)} km/h</td>
+                  <td>{formatLocation(vehicle.location)}</td>
+                  <td>{formatRelativeTime(vehicle.timestamp)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="empty">{loading ? 'Loading vehicles…' : 'No vehicles found in the backend.'}</p>
+        )}
       </section>
     </main>
   );
 }
-

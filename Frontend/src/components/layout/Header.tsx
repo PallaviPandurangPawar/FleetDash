@@ -2,6 +2,7 @@ interface Props {
   connected: boolean;
   vehicleCount: number;
   liveCount: number;
+  alertCount: number;
 }
 
 function IconSearch() {
@@ -29,7 +30,7 @@ function IconSettings() {
   );
 }
 
-export default function Header({ connected, vehicleCount, liveCount }: Props) {
+export default function Header({ connected, vehicleCount, liveCount, alertCount }: Props) {
   const now = new Intl.DateTimeFormat('en-US', {
     weekday: 'short',
     month: 'short',
@@ -55,8 +56,8 @@ export default function Header({ connected, vehicleCount, liveCount }: Props) {
 
       <div className="topbar-actions">
         <div className="timestamp-pill">{now}</div>
-        <div className="status-pill online">
-          <span className="status-dot" />
+        <div className={`status-pill ${connected ? 'online' : 'offline'}`}>
+          <span className={`status-dot ${connected ? 'online' : 'offline'}`} />
           {connected ? 'Live' : 'Offline'}
         </div>
         <div className="metric-inline">
@@ -69,7 +70,7 @@ export default function Header({ connected, vehicleCount, liveCount }: Props) {
         </div>
         <button className="icon-button" aria-label="Notifications">
           <IconBell />
-          <span className="notification-bubble">3</span>
+          {alertCount > 0 && <span className="notification-bubble">{alertCount > 99 ? '99+' : alertCount}</span>}
         </button>
         <button className="icon-button" aria-label="Settings shortcut">
           <IconSettings />

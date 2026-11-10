@@ -19,14 +19,11 @@ export function useVehicleStream(): VehicleUpdate[] {
         const onBatch = (data: ArrayBuffer): void => {
             try
             {
-                for (const update of decodeBatch(data)) 
-                {
+                for (const update of decodeBatch(data)) {
                     vehicleBuffer.set(update.vehicleId, update);
                 }
                 dirty.current = true;
-            }
-            catch (error)
-            {
+            } catch (error) {
                 console.error('Error decoding batch:', error);
             }
         };
@@ -34,8 +31,7 @@ export function useVehicleStream(): VehicleUpdate[] {
 
         socket.on(EVENTS.VEHICLE_BATCH, onBatch);
 
-        const timer = window.setInterval(() => 
-        {
+        const timer = window.setInterval(() => {
             if (!dirty.current) return;
             dirty.current = false;
             setSnapshot(Array.from(vehicleBuffer.values()));

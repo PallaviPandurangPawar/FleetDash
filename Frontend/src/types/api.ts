@@ -3,15 +3,15 @@
 import type { Vehicle } from "./telemetry";
 
 export interface Geofence {
-    _id : string;
-    name : string;
-    description : string;
-    polygon : {
-        type : 'Polygon';
-        coordinates : [number , number][][];
-    }
-    vehicleIds : string[];
-    active : boolean;
+  _id: string;
+  name: string;
+  description: string;
+  polygon: {
+    type: 'Polygon';
+    coordinates: [number, number][][];
+  };
+  vehicleIds: string[];
+  active: boolean;
 }
 
 export interface AlertRecord {
@@ -26,6 +26,17 @@ export interface AlertRecord {
   createdAt: string;
 }
 
+export interface LiveAlert {
+  id: string;
+  type: 'exit' | 'enter';
+  vehicleId: string;
+  geofenceId: string;
+  geofenceName: string;
+  lon: number;
+  lat: number;
+  occurredAt: number;
+}
+
 export interface VehiclesResponse {
   success: boolean;
   total: number;
@@ -34,18 +45,10 @@ export interface VehiclesResponse {
   vehicles: Vehicle[];
 }
 
-export interface AlertsResponse  {
-    success: boolean;
-    total: number;
-    page : number;
-    totatPages : number;
-    alert : AlertRecord[]; 
-}
-
 export interface GeofencesResponse {
-    success : boolean;
-    count : number;
-    geofences : Geofence[];
+  success: boolean;
+  count: number;
+  geofences: Geofence[];
 }
 
 export interface AlertSummary {

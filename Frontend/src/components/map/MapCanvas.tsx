@@ -1,119 +1,167 @@
 import { useEffect, useRef } from 'react';
+import type { Geofence } from '../../types/api';
+import type { DisplayVehicle, VehicleStatus } from '../../types/telemetry';
 
 interface Props {
-  vehicleCount: number;
+  vehicles: DisplayVehicle[];
+  geofences: Geofence[];
 }
 
-const routePixels: Array<[number, number]> = [
-  [0.12, 0.18],
-  [0.22, 0.26],
-  [0.32, 0.46],
-  [0.42, 0.41],
-  [0.56, 0.47],
-  [0.67, 0.6],
-  [0.8, 0.67],
-  [0.91, 0.48],
-];
+const markerColors: Record<VehicleStatus, string> = {
+  active: '#16a34a',
+  in_transit: '#1d4ed8',
+  idle: '#f59e0b',
+  offline: '#64748b',
+  maintenance: '#ef4444',
+};
 
-export default function MapCanvas({ vehicleCount }: Props) {
+interface Bounds {
+  minLon: number;
+  maxLon: number;
+  minLat: number;
+  maxLat: number;
+}
+
+function getBounds(vehicles: DisplayVehicle[], geofences: Geofence[]): Bounds | null {
+  let minLon = Infinity;
+  let maxLon = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let hasCoordinates = false;
+  const include = ([longitude, latitude]: [number, number]) => {
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return;
+    hasCoordinates = true;
+    minLon = Math.min(minLon, longitude);
+    maxLon = Math.max(maxLon, longitude);
+    minLat = Math.min(minLat, latitude);
+    maxLat = Math.max(maxLat, latitude);
+  };
+
+  for (const vehicle of vehicles) {
+    if (vehicle.location) include(vehicle.location);
+  }
+  for (const geofence of geofences) {
+    for (const ring of geofence.polygon.coordinates) {
+      for (const coordinate of ring) include(coordinate);
+    }
+  }
+  if (!hasCoordinates) return null;
+
+  const longitudePadding = Math.max((maxLon - minLon) * 0.12, 0.005);
+  const latitudePadding = Math.max((maxLat - minLat) * 0.12, 0.005);
+
+  minLon -= longitudePadding;
+  maxLon += longitudePadding;
+  minLat -= latitudePadding;
+  maxLat += latitudePadding;
+  return { minLon, maxLon, minLat, maxLat };
+}
+
+export default function MapCanvas({ vehicles, geofences }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      return;
-    }
+    const context = canvas?.getContext('2d');
+    if (!canvas || !context) return;
 
     const draw = () => {
       const dpr = window.devicePixelRatio || 1;
       const { clientWidth: width, clientHeight: height } = canvas;
+      if (!width || !height) return;
 
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = '#f6f9ff';
+      context.fillRect(0, 0, width, height);
 
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = '#f6f9ff';
-      ctx.fillRect(0, 0, width, height);
-
-      ctx.strokeStyle = '#dfeaf8';
-      ctx.lineWidth = 1;
-
+      context.strokeStyle = '#e5edf8';
+      context.lineWidth = 1;
       for (let x = 0; x <= width; x += 42) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
+        context.beginPath();
+        context.moveTo(x, 0);
+        context.lineTo(x, height);
+        context.stroke();
       }
-
       for (let y = 0; y <= height; y += 42) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+        context.stroke();
       }
 
-      const route = routePixels.map(([xRatio, yRatio]) => ({
-        x: xRatio * width,
-        y: yRatio * height,
-      }));
+      const bounds = getBounds(vehicles, geofences);
+      if (!bounds) return;
 
-      ctx.beginPath();
-      route.forEach((point, index) => {
-        if (index === 0) {
-          ctx.moveTo(point.x, point.y);
-          return;
-        }
-        ctx.lineTo(point.x, point.y);
+      const padding = 34;
+      const plotWidth = Math.max(1, width - padding * 2);
+      const plotHeight = Math.max(1, height - padding * 2);
+      const project = ([longitude, latitude]: [number, number]) => ({
+        x: padding + ((longitude - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * plotWidth,
+        y: height - padding - ((latitude - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * plotHeight,
       });
-      ctx.strokeStyle = '#5b86ff';
-      ctx.lineWidth = 3;
-      ctx.stroke();
 
-      ctx.beginPath();
-      ctx.arc(width * 0.22, height * 0.52, 88, 0, Math.PI * 2);
-      ctx.strokeStyle = '#d6dffb';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      const markerCount = Math.min(16, Math.max(6, vehicleCount));
-      for (let index = 0; index < markerCount; index += 1) {
-        const x = (index / markerCount) * width * 0.85 + width * 0.09;
-        const y = (Math.sin(index * 1.2) * 0.5 + 0.5) * height * 0.7 + height * 0.12;
-
-        ctx.beginPath();
-        ctx.fillStyle = index % 3 === 0 ? '#22c55e' : index % 3 === 1 ? '#f59e0b' : '#1d4ed8';
-        ctx.arc(x, y, 6, 0, Math.PI * 2);
-        ctx.fill();
+      for (const geofence of geofences) {
+        context.beginPath();
+        geofence.polygon.coordinates.forEach((ring) => {
+          ring.forEach((coordinate, index) => {
+            const point = project(coordinate);
+            if (index === 0) context.moveTo(point.x, point.y);
+            else context.lineTo(point.x, point.y);
+          });
+        });
+        context.fillStyle = 'rgba(29, 78, 216, 0.08)';
+        context.strokeStyle = 'rgba(29, 78, 216, 0.55)';
+        context.lineWidth = 1.5;
+        context.fill();
+        context.stroke();
+        const labelPoint = geofence.polygon.coordinates[0]?.[0];
+        if (labelPoint) {
+          const point = project(labelPoint);
+          context.fillStyle = '#334155';
+          context.font = '600 11px system-ui';
+          context.fillText(geofence.name, point.x + 5, point.y - 5);
+        }
       }
 
-      ctx.fillStyle = '#0f172a';
-      ctx.font = '600 12px system-ui';
-      ctx.fillText('North Hub', width * 0.7, height * 0.3);
-      ctx.fillText('Depot 6', width * 0.58, height * 0.72);
+      for (const vehicle of vehicles) {
+        if (!vehicle.location) continue;
+        const point = project(vehicle.location);
+        context.beginPath();
+        context.arc(point.x, point.y, 8, 0, Math.PI * 2);
+        context.fillStyle = 'rgba(255,255,255,0.94)';
+        context.fill();
+        context.beginPath();
+        context.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        context.fillStyle = markerColors[vehicle.status];
+        context.fill();
+      }
     };
 
     draw();
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
-
     return () => observer.disconnect();
-  }, [vehicleCount]);
+  }, [vehicles, geofences]);
+
+  const locatedCount = vehicles.filter((vehicle) => vehicle.location).length;
 
   return (
     <div className="map-area">
-      <canvas ref={canvasRef} />
-      <div className="map-label">Live map · {vehicleCount} vehicles tracked</div>
-      <div className="map-actions">
-        <span>All</span>
-        <span>Movement</span>
-        <span>Geo</span>
+      <canvas ref={canvasRef} aria-label={`Fleet map showing ${locatedCount} vehicle locations`} />
+      <div className="map-label">
+        Live map · {locatedCount} of {vehicles.length} vehicles located
       </div>
+      <div className="map-legend" aria-label="Map legend">
+        <span><i className="legend-dot in-transit" />In transit</span>
+        <span><i className="legend-dot active" />Active</span>
+        <span><i className="legend-dot idle" />Idle</span>
+        <span><i className="legend-dot offline" />Offline</span>
+        <span><i className="legend-zone" />Geofence</span>
+      </div>
+      {!locatedCount && <div className="map-empty">Waiting for vehicle location data</div>}
     </div>
   );
 }

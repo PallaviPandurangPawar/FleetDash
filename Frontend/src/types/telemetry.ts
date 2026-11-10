@@ -21,46 +21,46 @@ export interface DisplayVehicle {
   speed: number;
   fuelLevel: number;
   live: boolean;
+  location: [number, number] | null;
+  heading: number;
+  timestamp: number | null;
 }
-
 
 export interface VehicleUpdate {
-    vehicleId: string;
-    lon : number;
-    lat : number;
-    heading : number;
-    timestamp : number;
-    speed : number;
-    fuellevel : number;
-    ignition : boolean;
+  vehicleId: string;
+  lon: number;
+  lat: number;
+  heading: number;
+  timestamp: number;
+  speed: number;
+  fuelLevel: number;
+  ignition: boolean;
 }
 
 
-export type VehicleStatus = 'online' | 'offline' | 'active' | 'idle' | 'in_transit' | 'maintenance';
+export type VehicleStatus = 'active' | 'offline' | 'idle' | 'in_transit' | 'maintenance';
 
 
 export interface Vehicle {
-    vehicleId : string;
-    plateNumber : string;
-    make :string;
-    modal : string;
-    year : number;
-    driverNumber : number;
-    status : VehicleStatus;
-    lastKnownLocation : 
-    {
-        type : 'Point';
-        coordinates : [number , number];
-    }
-
-    lastTelemetry: {
-        speed : number ;
-        fuelLevel : number;
-        engineTemp : number;
-        batteryVoltage : number;
-        timestamp : number;
-    }
-
+  vehicleId: string;
+  plateNumber: string;
+  make: string;
+  model: string;
+  year: number;
+  driverName: string;
+  status: VehicleStatus;
+  lastKnownLocation: {
+    type: 'Point';
+    coordinates: [number, number];
+    updatedAt?: string;
+  };
+  lastTelemetry: {
+    speed: number;
+    fuelLevel: number;
+    engineTemp: number;
+    batteryVoltage: number;
+    timestamp: string;
+  };
 }
 
 export interface GeofenceAlert {

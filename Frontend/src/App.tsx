@@ -1,32 +1,109 @@
+import { useEffect, useMemo, useState } from 'react';
 import { useSocket } from './hooks/useSocket';
 import { useVehicleStream } from './hooks/useVehicleStream';
+import { useAlerts } from './hooks/useAlerts';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
-import type { DisplayVehicle } from './types/telemetry';
+import { getAllVehicles, getGeofences } from './services/api';
+import type { Geofence } from './types/api';
+import type { DisplayVehicle, Vehicle, VehicleStatus } from './types/telemetry';
 import { DashboardPage } from './pages/DashboardPage';
 
-const FAKE: DisplayVehicle[] = [
-  { vehicleId: 'SIM-001', plateNumber: 'WB-SIM-001', driverName: 'Ravi', status: 'in_transit', speed: 47.3, fuelLevel: 82.6, live: true },
-  { vehicleId: 'SIM-002', plateNumber: 'WB-SIM-002', driverName: 'Anita', status: 'idle', speed: 0, fuelLevel: 55.1, live: true },
-  { vehicleId: 'SIM-003', plateNumber: 'WB-SIM-003', driverName: 'Sameer', status: 'maintenance', speed: 0, fuelLevel: 20.4, live: false },
-  { vehicleId: 'SIM-004', plateNumber: 'WB-SIM-004', driverName: 'Leah', status: 'active', speed: 62.1, fuelLevel: 74.8, live: true },
-  { vehicleId: 'SIM-005', plateNumber: 'WB-SIM-005', driverName: 'Noah', status: 'offline', speed: 0, fuelLevel: 18.7, live: false },
-  { vehicleId: 'SIM-006', plateNumber: 'WB-SIM-006', driverName: 'Priya', status: 'online', speed: 31.5, fuelLevel: 86.3, live: true },
-];
+function toDisplayVehicle(vehicle: Vehicle, liveUpdate?: ReturnType<typeof useVehicleStream>[number]): DisplayVehicle {
+  const status: VehicleStatus = liveUpdate
+    ? liveUpdate.speed > 3
+      ? 'in_transit'
+      : liveUpdate.ignition
+        ? 'idle'
+        : 'offline'
+    : vehicle.status;
+
+  return {
+    vehicleId: vehicle.vehicleId,
+    plateNumber: vehicle.plateNumber,
+    driverName: vehicle.driverName,
+    status,
+    speed: liveUpdate?.speed ?? vehicle.lastTelemetry.speed,
+    fuelLevel: liveUpdate?.fuelLevel ?? vehicle.lastTelemetry.fuelLevel,
+    live: Boolean(liveUpdate),
+    location: liveUpdate
+      ? [liveUpdate.lon, liveUpdate.lat]
+      : vehicle.lastKnownLocation?.coordinates ?? null,
+    heading: liveUpdate?.heading ?? 0,
+    timestamp: liveUpdate?.timestamp ?? (
+      vehicle.lastTelemetry.timestamp ? new Date(vehicle.lastTelemetry.timestamp).getTime() : null
+    ),
+  };
+}
 
 export default function App() {
   const connected = useSocket();
   const streamVehicles = useVehicleStream();
-  const vehicleCount = streamVehicles.length || FAKE.length;
-  const liveCount = streamVehicles.filter((vehicle) => vehicle.speed > 5).length || 3;
+  const { alerts, summary, loading: alertsLoading, error: alertsError, acknowledge } = useAlerts();
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [geofences, setGeofences] = useState<Geofence[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadErrors, setLoadErrors] = useState<string[]>([]);
+
+  useEffect(() => {
+    let active = true;
+
+    Promise.allSettled([getAllVehicles(), getGeofences()])
+      .then(([vehiclesResult, geofencesResult]) => {
+        if (!active) return;
+        const errors: string[] = [];
+
+        if (vehiclesResult.status === 'fulfilled') {
+          setVehicles(vehiclesResult.value.vehicles);
+        } else {
+          errors.push(vehiclesResult.reason instanceof Error
+            ? vehiclesResult.reason.message
+            : 'Unable to load vehicles');
+        }
+
+        if (geofencesResult.status === 'fulfilled') {
+          setGeofences(geofencesResult.value.geofences);
+        } else {
+          errors.push(geofencesResult.reason instanceof Error
+            ? geofencesResult.reason.message
+            : 'Unable to load geofences');
+        }
+
+        setLoadErrors(errors);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const displayVehicles = useMemo(() => {
+    const liveUpdates = new Map(streamVehicles.map((update) => [update.vehicleId, update]));
+    return vehicles.map((vehicle) => toDisplayVehicle(vehicle, liveUpdates.get(vehicle.vehicleId)));
+  }, [vehicles, streamVehicles]);
+
+  const vehicleCount = vehicles.length;
+  const liveCount = displayVehicles.filter((vehicle) => vehicle.live && vehicle.speed > 3).length;
 
   return (
     <DashboardLayout
-      header={<Header connected={connected} vehicleCount={vehicleCount} liveCount={liveCount} />}
-      sidebar={<Sidebar vehicles={FAKE} />}
+      header={<Header connected={connected} vehicleCount={vehicleCount} liveCount={liveCount} alertCount={summary?.unacknowledged ?? 0} />}
+      sidebar={<Sidebar vehicles={displayVehicles} />}
     >
-      <DashboardPage vehicleCount={vehicleCount} connected={connected} />
+      <DashboardPage
+        vehicles={displayVehicles}
+        geofences={geofences}
+        alerts={alerts}
+        alertSummary={summary}
+        loading={loading || alertsLoading}
+        connected={connected}
+        errors={[...loadErrors, ...(alertsError ? [alertsError] : [])]}
+        onAcknowledge={acknowledge}
+      />
     </DashboardLayout>
   );
 }

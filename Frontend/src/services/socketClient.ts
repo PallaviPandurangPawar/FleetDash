@@ -9,7 +9,7 @@ export const EVENTS = {
 } as const;
 
 
-export const socket: Socket = io(import.meta.env.VITE_SOCKET_URL, {
+export const socket: Socket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000', {
   transports: ['websocket'],
   autoConnect: false,
 });
