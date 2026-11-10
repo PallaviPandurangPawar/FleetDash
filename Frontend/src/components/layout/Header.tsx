@@ -1,6 +1,7 @@
 // Frontend/src/components/layout/Header.tsx
 // Brand, live counters, connection status, alerts button and the admin lock
 import AdminLock from '../admin/AdminLock';
+import FpsMeter from '../common/FpsMeter';
 
 interface Props {
   connected: boolean;
@@ -24,6 +25,7 @@ export default function Header({ connected, vehicleCount, liveCount, alertCount,
       </div>
 
       <div className="header-stats">
+        <FpsMeter />
         <div className="stat">
           <span className="stat-label">Vehicles:</span>
           <span className="stat-value">{vehicleCount}</span>

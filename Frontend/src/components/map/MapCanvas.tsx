@@ -299,7 +299,7 @@ export default function MapCanvas({
     <div className="map-area">
       <canvas ref={canvasRef} className={drawing ? 'is-drawing' : undefined} />
       <div className="map-label">
-        Live map (Canvas) • {vehicles.length} vehicles tracked
+        Live map (Canvas) • {vehicles.length} vehicles tracked {placed < vehicles.length ? ` (${vehicles.length - placed} without a position yet)` : ''}
         <br />
         <small>Drag to pan • scroll to zoom • double-click to reset</small>
       </div>

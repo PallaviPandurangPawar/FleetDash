@@ -640,3 +640,14 @@ button, input, select { font-family: inherit; }
 .vehicle-hud-close:hover { color: var(--accent); }
 .vehicle-hud-grid > div { min-width: 0; }
 .vehicle-hud-grid dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+
+.fps-meter {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.fps-good { color: var(--ok); }
+.fps-low { color: #f97316; }
