@@ -10,9 +10,11 @@ interface Props {
   vehicles: DisplayVehicle[];
   onVehicleDeleted: (vehicleId: string) => void;
   onVehicleChanged: () => void;
+  selectedId: string | null;
+  onSelect: (vehicleId: string) => void;
 }
 
-export default function VehicleList({ vehicles, onVehicleDeleted, onVehicleChanged }: Props) {
+export default function VehicleList({ vehicles, onVehicleDeleted, onVehicleChanged, selectedId, onSelect }: Props) {
     if(vehicles.length === 0) {
         return <p className="empty">No vehicles available.</p>;
     }
@@ -24,7 +26,7 @@ export default function VehicleList({ vehicles, onVehicleDeleted, onVehicleChang
         <div className="vehicle-list">
             {visible.map((v) =>
 
-                <VehicleCard key={v.vehicleId} vehicle={v} onDeleted={onVehicleDeleted} onChanged={onVehicleChanged} />
+                <VehicleCard key={v.vehicleId} vehicle={v} onDeleted={onVehicleDeleted} onChanged={onVehicleChanged} selected={v.vehicleId === selectedId} onSelect={onSelect} />
             )}
         </div>
             {vehicles.length > MAX_VISIBLE && (

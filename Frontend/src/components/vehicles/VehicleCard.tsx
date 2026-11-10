@@ -1,5 +1,5 @@
 // Frontend/src/components/vehicles/VehicleCard.tsx
-// Single vehicle summary card (with edit and delete in admin mode)
+// Single vehicle card (with edit and delete in admin mode)
 import { useState } from 'react';
 import { useAdminKey } from '../../hooks/useAdminKey';
 import { deleteVehicle } from '../../services/api';
@@ -11,9 +11,11 @@ interface Props {
   vehicle: DisplayVehicle;
   onDeleted: (vehicleId: string) => void;
   onChanged: () => void;
+  selected?: boolean;
+  onSelect?: (vehicleId: string) => void;
 }
 
-export function VehicleCard({ vehicle, onDeleted, onChanged }: Props) {
+export function VehicleCard({ vehicle, onDeleted, onChanged, selected = false, onSelect }: Props) {
   const { unlocked } = useAdminKey();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -49,23 +51,32 @@ export function VehicleCard({ vehicle, onDeleted, onChanged }: Props) {
   }
 
   return (
-    <div className="card">
+    <div
+      className={selected ? 'card card-selected' : 'card'}
+      onClick={() => onSelect?.(vehicle.vehicleId)}
+    >
       <div className="card-top">
-        <span className="card-id">{vehicle.vehicleId}</span>
+        <div>
+          <div className="card-id">{vehicle.vehicleId}</div>
+          <div className="card-plate">{vehicle.plateNumber}</div>
+        </div>
         <StatusBadge status={vehicle.status} />
       </div>
 
-      <div className="card-meta">
-        <span>{vehicle.plateNumber}</span>
-        <span>{vehicle.driverName}</span>
-      </div>
-      <div className="card-meta">
-        <span>Speed: {vehicle.speed.toFixed(0)} km/h</span>
-        <span>Fuel: {vehicle.fuelLevel.toFixed(0)} %</span>
+      <div className="card-foot">
+        <span className="card-driver">{vehicle.driverName}</span>
+        <span className="card-stats">
+          <span>
+            Speed: <strong>{vehicle.speed.toFixed(0)} km/h</strong>
+          </span>
+          <span>
+            Fuel: <strong>{vehicle.fuelLevel.toFixed(0)}%</strong>
+          </span>
+        </span>
       </div>
 
       {unlocked && vehicle.registered && (
-        <div className="card-actions">
+        <div className="card-actions" onClick={(e) => e.stopPropagation()}>
           {confirming ? (
             <>
               <label className="card-check">

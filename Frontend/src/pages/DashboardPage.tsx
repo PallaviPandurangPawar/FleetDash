@@ -22,6 +22,13 @@ export default function DashboardPage() {
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [geofences, setGeofences] = useState<Geofence[]>([]);
 
+  // The vehicle picked in the list or on the map; picking it again in the list clears the pick
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const toggleSelected = useCallback(
+    (id: string) => setSelectedId((prev) => (prev === id ? null : id)),
+    []
+  );
+
 
   // Drawing a new geofence: the map collects the clicked corners
   const [drawing, setDrawing] = useState(false);
@@ -74,6 +81,7 @@ export default function DashboardPage() {
       });
       loadVehicles();
       loadGeofences();
+      setSelectedId((prev) => (prev !== null && vehicleIds.includes(prev) ? null : prev));
     },
     [loadVehicles, loadGeofences]
   );
@@ -138,6 +146,9 @@ export default function DashboardPage() {
         <Sidebar
           vehicles={rows}
           onVehiclesChanged={loadVehicles}
+          connected={connected}
+          selectedId={selectedId}
+          onSelect={toggleSelected}
           onVehicleDeleted={handleDeleted}
           onVehiclesRemoved={handleRemoved}
           onGeofencesChanged={loadGeofences}
@@ -158,6 +169,8 @@ export default function DashboardPage() {
           drawing={drawing}
           draft={draft}
           onMapClick={addCorner}
+          selectedId={selectedId}
+          onSelectVehicle={setSelectedId}
         />
         {!alertsOpen && <AlertToasts toasts={alerts.toasts} onDismiss={alerts.dismissToast} />}
         {alertsOpen && (

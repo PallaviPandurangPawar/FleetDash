@@ -5,7 +5,7 @@ import type { Geofence } from '../types/api';
 /** Turns a position into canvas x/y. The map supplies it, so everything lines up with the real map. */
 export type ToScreen = (lon: number, lat: number) => [number, number];
 
-const NEON = '#22d3ee';
+const NEON = '#b9f12f';
 
 export function drawGeofences(
   ctx: CanvasRenderingContext2D,
@@ -36,14 +36,14 @@ export function drawGeofences(
     ctx.shadowBlur = 10;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 4]);
-    ctx.fillStyle = 'rgba(34, 211, 238, 0.08)';
+    ctx.fillStyle = 'rgba(185, 241, 47, 0.08)';
     ctx.strokeStyle = NEON;
     ctx.fill();
     ctx.stroke();
 
     ctx.setLineDash([]);
     ctx.shadowBlur = 6;
-    ctx.fillStyle = '#a5f3fc';
+    ctx.fillStyle = '#f2f0e9';
     ctx.fillText(fence.name.toUpperCase(), sumX / ring.length, sumY / ring.length);
   }
 

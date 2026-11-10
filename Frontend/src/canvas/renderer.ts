@@ -6,11 +6,11 @@ import { drawGeofences } from './geofenceLayer';
 import type { ToScreen } from './geofenceLayer';
 
 export const STATUS_COLORS: Record<VehicleStatus, string> = {
-  in_transit: '#39ff14',
-  active: '#a78bfa',
-  idle: '#facc15',
-  maintenance: '#e879f9',
-  offline: '#64748b',
+  in_transit: '#b9f12f',
+  active: '#5eead4',
+  idle: '#f2f0e9',
+  maintenance: '#fbbf24',
+  offline: '#94a3b8',
 };
 
 const LABEL_MIN_ZOOM = 13; // vehicle ids are shown only from this map zoom level
@@ -31,6 +31,7 @@ export interface MapFrame {
   height: number;
   zoom: number;
   time: number; // milliseconds, drives the radar ping animation
+  selectedId: string | null; // the vehicle picked in the list or on the map
   toScreen: ToScreen;
 }
 
@@ -87,10 +88,29 @@ function drawVehicles(ctx: CanvasRenderingContext2D, vehicles: DisplayVehicle[],
       ctx.lineWidth = 1;
     }
 
-    if (showLabels) {
+    if (v.vehicleId === frame.selectedId) {
+      // The picked vehicle gets a steady ring and a name tag, like a target lock
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 17, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      const tagWidth = ctx.measureText(v.vehicleId).width + 16;
+      ctx.fillStyle = 'rgba(6, 26, 39, 0.95)';
+      ctx.fillRect(x + 22, y - 11, tagWidth, 22);
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(x + 22, y - 11, tagWidth, 22);
+      ctx.fillStyle = color;
+      ctx.fillText(v.vehicleId, x + 30, y + 4);
+      ctx.lineWidth = 1;
+    } else if (showLabels) {
       ctx.shadowColor = color;
       ctx.shadowBlur = 6;
-      ctx.fillStyle = '#a5f3fc';
+      ctx.fillStyle = '#f2f0e9';
       ctx.fillText(v.vehicleId, x + 16, y + 4);
     }
   }

@@ -33,7 +33,9 @@ export default function AdminLock() {
   if (unlocked) {
     return (
       <span className="admin">
-        <span className="admin-on">Admin on</span>
+        <span className="admin-on">
+          <i className="fa-solid fa-lock-open" /> Admin on
+        </span>
         <button type="button" className="btn btn-ghost" onClick={lock}>
           Lock
         </button>
@@ -43,8 +45,8 @@ export default function AdminLock() {
 
   if (!open) {
     return (
-      <button type="button" className="btn" onClick={() => setOpen(true)}>
-        Unlock admin
+      <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
+        <i className="fa-solid fa-lock" /> Unlock admin
       </button>
     );
   }

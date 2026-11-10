@@ -1,5 +1,5 @@
 // Frontend/src/components/map/MapCanvas.tsx
-// The live map: a real Google map in a cyber style, with the vehicles and geofences drawn on a canvas on top.
+// The live map: a real Google map in a midnight teal style, with the vehicles and geofences drawn on a canvas on top.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CYBER_MAP_STYLE } from '../../canvas/cyberMapStyle';
 import { drawMap, hasPosition } from '../../canvas/renderer';
@@ -7,6 +7,7 @@ import { loadGoogleMaps } from '../../services/googleMaps';
 import type { Geofence } from '../../types/api';
 import type { DisplayVehicle } from '../../types/telemetry';
 import MapControls from './MapControls';
+import VehicleHud from './VehicleHud';
 
 interface Props {
   vehicles: DisplayVehicle[];
@@ -14,6 +15,8 @@ interface Props {
   drawing: boolean; // true while the user is drawing a new geofence
   draft: [number, number][]; // the corners placed so far, as [lon, lat]
   onMapClick: (lon: number, lat: number) => void;
+  selectedId: string | null; // the vehicle picked in the list or on the map
+  onSelectVehicle: (vehicleId: string | null) => void;
 }
 
 const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -21,24 +24,42 @@ const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const AUTH_FAILURE_TEXT =
   'Google rejected the API key. Check that billing is on, that the Maps JavaScript API is enabled, and that the key allows http://localhost:5173/*';
 
-export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapClick }: Props) {
+function formatCoord(value: number, positive: string, negative: string): string {
+  return `${Math.abs(value).toFixed(4)}° ${value >= 0 ? positive : negative}`;
+}
+
+export default function MapCanvas({
+  vehicles,
+  geofences,
+  drawing,
+  draft,
+  onMapClick,
+  selectedId,
+  onSelectVehicle,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const overlayRef = useRef<google.maps.OverlayView | null>(null);
+  const lastPanned = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [view, setView] = useState({ lat: 20, lng: 0, zoom: 2 });
   const [problem, setProblem] = useState<string | null>(
     API_KEY ? null : 'No Google Maps key. Add VITE_GOOGLE_MAPS_API_KEY to Frontend/.env, then restart npm run dev.'
   );
 
   // The newest data, readable from the map's event handlers
-  const dataRef = useRef({ vehicles, geofences, draft });
-  dataRef.current = { vehicles, geofences, draft };
+  const dataRef = useRef({ vehicles, geofences, draft, selectedId });
+  dataRef.current = { vehicles, geofences, draft, selectedId };
 
   const clickRef = useRef(onMapClick);
   clickRef.current = onMapClick;
+  const selectRef = useRef(onSelectVehicle);
+  selectRef.current = onSelectVehicle;
 
   const placed = vehicles.filter(hasPosition).length;
+  const liveCount = vehicles.filter((v) => v.heading !== undefined).length;
+  const selected = selectedId ? vehicles.find((v) => v.vehicleId === selectedId) ?? null : null;
 
   // Draws the vehicles and geofences on the transparent canvas over the map
   const redraw = useCallback(() => {
@@ -73,6 +94,7 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
         height,
         zoom: map.getZoom() ?? 2,
         time: performance.now(),
+        selectedId: dataRef.current.selectedId,
         toScreen: (lon, lat) => {
           const point = projection.fromLatLngToContainerPixel(new google.maps.LatLng(lat, lon));
           return point ? [point.x, point.y] : [-9999, -9999];
@@ -89,6 +111,7 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
     if (!API_KEY) return;
 
     let cancelled = false;
+    const listeners: google.maps.MapsEventListener[] = [];
 
     // Google calls this when it rejects the key (wrong key, billing off, website not allowed, ...)
     (window as unknown as { gm_authFailure?: () => void }).gm_authFailure = () =>
@@ -107,7 +130,7 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
           disableDefaultUI: true,
           gestureHandling: 'greedy', // the mouse wheel zooms directly
           clickableIcons: false,
-          backgroundColor: '#050b14',
+          backgroundColor: '#061a27',
           styles: CYBER_MAP_STYLE,
         });
 
@@ -117,6 +140,20 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
         overlay.onRemove = () => {};
         overlay.draw = () => redraw();
         overlay.setMap(map);
+
+        // Keep the coordinates bar in step with the map, at most once per frame
+        let queued = false;
+        const updateView = () => {
+          if (queued) return;
+          queued = true;
+          requestAnimationFrame(() => {
+            queued = false;
+            const center = map.getCenter();
+            if (center) setView({ lat: center.lat(), lng: center.lng(), zoom: map.getZoom() ?? 2 });
+          });
+        };
+        listeners.push(map.addListener('center_changed', updateView));
+        listeners.push(map.addListener('zoom_changed', updateView));
 
         mapRef.current = map;
         overlayRef.current = overlay;
@@ -129,6 +166,7 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
 
     return () => {
       cancelled = true;
+      listeners.forEach((listener) => listener.remove());
       overlayRef.current?.setMap(null);
       overlayRef.current = null;
       mapRef.current = null;
@@ -138,7 +176,7 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
   // Draw again when the data changes or the box is resized
   useEffect(() => {
     redraw();
-  }, [vehicles, geofences, draft, redraw]);
+  }, [vehicles, geofences, draft, selectedId, redraw]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -148,23 +186,65 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
     return () => observer.disconnect();
   }, [redraw]);
 
-    // While a geofence is being drawn, clicks on the map place its corners
+  // Clicks on the map: they place corners while a geofence is being drawn, otherwise they pick a vehicle
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready) return;
+    const overlay = overlayRef.current;
+    if (!map || !overlay || !ready) return;
 
     map.setOptions({ draggableCursor: drawing ? 'crosshair' : null, disableDoubleClickZoom: drawing });
-    if (!drawing) return;
 
     const listener = map.addListener('click', (e: google.maps.MapMouseEvent) => {
-      if (e.latLng) clickRef.current(e.latLng.lng(), e.latLng.lat());
+      if (!e.latLng) return;
+
+      if (drawing) {
+        clickRef.current(e.latLng.lng(), e.latLng.lat());
+        return;
+      }
+
+      const projection = overlay.getProjection();
+      const click = projection?.fromLatLngToContainerPixel(e.latLng);
+      if (!projection || !click) return;
+
+      // A click near a vehicle picks it; a click on an empty spot clears the selection
+      let nearest: string | null = null;
+      let nearestDistance = 16;
+      for (const v of dataRef.current.vehicles) {
+        if (!hasPosition(v)) continue;
+        const point = projection.fromLatLngToContainerPixel(new google.maps.LatLng(v.lat, v.lon));
+        if (!point) continue;
+        const distance = Math.hypot(point.x - click.x, point.y - click.y);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearest = v.vehicleId;
+        }
+      }
+      selectRef.current(nearest);
     });
+
     return () => listener.remove();
   }, [drawing, ready]);
 
-  // Zoom and move so that every vehicle and geofence is visible
-    // The radar pings need a new frame about 30 times per second while vehicles send live data
-  const hasLive = vehicles.some((v) => v.heading !== undefined);
+  // When a vehicle is picked, move the map to it (once per pick)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!selectedId) {
+      lastPanned.current = null;
+      return;
+    }
+    if (lastPanned.current === selectedId) return;
+
+    const vehicle = dataRef.current.vehicles.find((v) => v.vehicleId === selectedId);
+    if (!vehicle || !hasPosition(vehicle)) return;
+
+    lastPanned.current = selectedId;
+    map.panTo({ lat: vehicle.lat, lng: vehicle.lon });
+    if ((map.getZoom() ?? 0) < 11) map.setZoom(12);
+  }, [selectedId, ready]);
+
+  // The radar pings need a new frame about 30 times per second while vehicles send live data
+  const hasLive = liveCount > 0;
   useEffect(() => {
     if (!hasLive) return;
 
@@ -181,7 +261,8 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
 
     return () => cancelAnimationFrame(frameId);
   }, [hasLive, redraw]);
-  
+
+  // Zoom and move so that every vehicle and geofence is visible
   const fit = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -227,6 +308,7 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
         Live map (Canvas) • {vehicles.length} vehicles tracked
         {placed < vehicles.length ? ` (${vehicles.length - placed} without a position yet)` : ''}
       </div>
+      {selected && <VehicleHud vehicle={selected} onClose={() => onSelectVehicle(null)} />}
       {problem && <div className="map-message map-message-bad">{problem}</div>}
       {!problem && !ready && <div className="map-message">Loading map...</div>}
       {drawing && (
@@ -234,6 +316,18 @@ export default function MapCanvas({ vehicles, geofences, drawing, draft, onMapCl
           Click the map to place the corners of the geofence ({draft.length} placed)
         </div>
       )}
+      <div className="coords-bar">
+        <span>
+          <span className="coords-dot" />
+          LAT: {formatCoord(view.lat, 'N', 'S')}
+        </span>
+        <span>
+          <span className="coords-dot" />
+          LON: {formatCoord(view.lng, 'E', 'W')}
+        </span>
+        <span>ZOOM: {view.zoom}</span>
+        <span className="coords-accent">LIVE: {liveCount}</span>
+      </div>
       <MapControls onZoomIn={() => zoomBy(1)} onZoomOut={() => zoomBy(-1)} onFit={fit} />
     </div>
   );
