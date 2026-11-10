@@ -562,3 +562,11 @@ body { background: var(--bg); color: var(--text); }
   from { opacity: 0; transform: translateX(16px); }
   to { opacity: 1; transform: none; }
 }
+
+.map-area canvas {
+  cursor: grab;
+  touch-action: none;
+}
+.map-area canvas:active {
+  cursor: grabbing;
+}
