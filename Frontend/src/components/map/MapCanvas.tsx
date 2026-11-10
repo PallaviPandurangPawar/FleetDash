@@ -297,16 +297,11 @@ export default function MapCanvas({
 
   return (
     <div className="map-area">
-      <div ref={hostRef} className="map-host" />
-      <canvas ref={canvasRef} className="map-overlay" />
-      <div className="map-fx" />
-      <div className="map-corner tl" />
-      <div className="map-corner tr" />
-      <div className="map-corner bl" />
-      <div className="map-corner br" />
+      <canvas ref={canvasRef} className={drawing ? 'is-drawing' : undefined} />
       <div className="map-label">
         Live map (Canvas) • {vehicles.length} vehicles tracked
-        {placed < vehicles.length ? ` (${vehicles.length - placed} without a position yet)` : ''}
+        <br />
+        <small>Drag to pan • scroll to zoom • double-click to reset</small>
       </div>
       {selected && <VehicleHud vehicle={selected} onClose={() => onSelectVehicle(null)} />}
       {problem && <div className="map-message map-message-bad">{problem}</div>}
