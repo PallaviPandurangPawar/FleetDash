@@ -1,21 +1,43 @@
 # Load Test Results (Mid-Project Review)
 
-All tests ran on a local development machine (Node.js v24, MongoDB and Redis on localhost),
-against the `fleetdash_load` database, with `LOG_REQUESTS=false`.
+All tests ran on one local Windows development machine (Node.js, MongoDB and Redis on localhost, and
+k6 on the same PC), against the `fleetdash_load` database, with `LOG_REQUESTS=false`.
 
 ## 1. Ingestion: POST /api/telemetry/ingest
 
-Scenario: constant arrival rate for 30 s, 50 vehicles, k6 script `ingest.k6.js`.
+Scenario: 50 vehicles, k6 script `ingest.k6.js`, run with `node loadtests/run-steps.js 2000` and
+`STEP_DURATION=30s`. Each run has a 10-second warm-up (the rate grows from 100 to 2,000 requests per
+second so connections are opened gradually, like a real fleet), then holds 2,000 requests per second for
+30 seconds. The achieved rate and the p95 are measured on the steady 30 seconds only. Failed and dropped
+requests are counted over the whole run, including the warm-up.
 
-| Target rate | Achieved | Requests | Failed | avg | p95 | max | Accepted | Stored in DB |
+Results with **hourly buckets** (one bucket per vehicle per clock hour, safety cap 1,000 readings):
+
+| Run | Target rate | Achieved (steady) | p95 | Failed | Dropped | Accepted | Stored in DB | Clean |
 |---|---|---|---|---|---|---|---|---|
-| 2,000 req/s | 1,956 req/s | 59,068 | 0 (0.00%) | 261 ms | 428 ms | 852 ms | 59,068 | 59,068 |
-| 1,500 req/s | 1,480 req/s | 44,575 | 0 (0.00%) | 162 ms | 261 ms | 578 ms | 44,575 | 44,575 |
+| 1 | 2,000 req/s | 2,000 req/s | 210 ms | 0 (0.0%) | 0 | 70,396 | 70,396 | YES |
+| 2 | 2,000 req/s | 2,000 req/s | 161 ms | 0 (0.0%) | 0 | 70,397 | 70,397 | YES |
+| 3 | 2,000 req/s | 2,000 req/s | 186 ms | 0 (0.0%) | 0 | 70,390 | 70,390 | YES |
+| 4 (k6 started directly) | 2,000 req/s | 2,000 req/s | 163 ms | 0 (0.0%) | 0 | 70,389 | 70,389 | YES |
 
-- Zero data omission: every request answered with 201 is stored in MongoDB (accepted = stored).
-- Thresholds: error rate under 1% and p95 under 500 ms were met in both runs.
-- At 2,000 req/s k6 reported 934 dropped iterations. These are requests k6 itself could not
-  start on the test machine, they were never sent to the server. The server lost no data.
+- A run with 50 vehicles creates 100 buckets (about 2 per vehicle, because the cap of 1,000 is reached within the hour). With 100 readings per bucket it created at least 700.
+- Before hourly buckets (100 readings per bucket) the same test gave a p95 of 65 to 92 ms. Larger buckets cost more per write, so p95 is now higher, but still far below the 500 ms limit.
+
+- Zero data omission: every request answered with 201 is stored in MongoDB (accepted = stored), in all three runs.
+- "Clean" means: full rate reached, nothing dropped by k6, p95 under 500 ms, under 1% failed, accepted = stored.
+- The result is repeatable: three runs in a row were clean.
+
+### What had to change to measure 2,000 requests per second
+
+An earlier attempt on the same PC lost requests (about 3 to 4% failed, "connection refused") even though no
+accepted reading was ever lost. The causes were on the test side, and they were fixed:
+
+- k6 now creates one virtual user per request per second in advance (`PRE_VUS` = `RATE`), so it can keep the rate.
+- A 10-second warm-up (`RAMP`) opens connections gradually. Opening about 2,000 connections in the first
+  second made Windows refuse some of them.
+- The server accepts more waiting connections (`SERVER_BACKLOG`, default 4096) and keeps idle connections
+  open for 65 seconds, so clients reuse them.
+- `run-steps.js` now prints the error reasons and counts "no answer", 5xx and other failures separately.
 
 ## 2. Batch ingestion: POST /api/telemetry/ingest-batch
 
@@ -26,17 +48,17 @@ k6 script `batch.k6.js`.
 |---|---|---|---|---|
 | 76 | 0 (0.00%) | 65 ms | 22,800 | 22,800 |
 
-## 3. Database query speed (MongoDB bucket pattern)
+## 3. Database query speed (MongoDB hourly buckets)
 
-Script `scripts/benchmarkQueries.js LOAD-001`, 20 runs each, index
-`{ vehicleId: 1, bucketStartTime: -1, count: 1 }`.
+Script `scripts/benchmarkQueries.js LOAD-001`, 20 runs each, after a 2,000 req/s load run, index
+`{ vehicleId: 1, bucketStartTime: -1, count: 1 }`. The vehicle had 2 buckets and 1,362 readings.
 
 | Query | avg | p95 | min |
 |---|---|---|---|
-| Find newest open bucket (used by every ingest) | 1.03 ms | 1.35 ms | 0.67 ms |
-| Latest 5 buckets for a vehicle (history) | 1.04 ms | 1.50 ms | 0.70 ms |
+| Find the open bucket of one clock hour (used by every ingest) | 1.75 ms | 2.67 ms | 1.09 ms |
+| Latest 5 buckets for a vehicle (history) | 1.40 ms | 1.79 ms | 1.10 ms |
 
-`explain('executionStats')`: server execution 1 ms, 1 index key examined, 1 document
+`explain('executionStats')`: server execution 0 ms, 1 index key examined, 1 document
 examined. Target was under 5 ms.
 
 ## How to run
@@ -51,13 +73,12 @@ node scripts/countLoadReadings.js --delete
 set LOG_REQUESTS=false
 npm start
 
-:: 3. in a second window: ingest test
-set RATE=2000
-set DURATION=30s
-k6 run loadtests/ingest.k6.js 2>nul
+:: 3. in a second window: ingest test (10 s warm-up + 30 s at 2,000 per second; it also checks accepted = stored)
+set STEP_DURATION=30s
+node loadtests/run-steps.js 2000
 
-:: 4. compare "readings_accepted" in the k6 summary with the stored total
-node scripts/countLoadReadings.js
+:: 4. optional: run all steps (500, 1000, 1500, 2000) and print one table
+node loadtests/run-steps.js
 
 :: 5. batch test
 set RATE=5

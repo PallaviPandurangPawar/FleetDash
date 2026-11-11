@@ -1019,6 +1019,224 @@ th {
   font-size: 0.8rem;
 }
 
+.fleet-tools-panel {
+  margin-top: 20px;
+}
+
+.fleet-tools-summary {
+  margin: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.fleet-tools-summary::-webkit-details-marker {
+  display: none;
+}
+
+.fleet-tools-summary::after {
+  content: '+';
+  color: var(--text-soft);
+  font-size: 1.2rem;
+}
+
+.fleet-tools-panel[open] .fleet-tools-summary {
+  margin-bottom: 16px;
+}
+
+.fleet-tools-panel[open] .fleet-tools-summary::after {
+  content: '−';
+}
+
+.fleet-tools-panel h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.fleet-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tool-group {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(247, 249, 255, 0.72);
+}
+
+.tool-group h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.fleet-tool-form label,
+.tool-number-grid label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.fleet-tool-form input:not([type='checkbox']),
+.fleet-tool-form select,
+.fleet-tool-form textarea,
+.tool-number-grid input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px 10px;
+  background: #fff;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.fleet-tool-form textarea {
+  resize: vertical;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.fleet-admin-unlock {
+  max-width: 440px;
+}
+
+.fleet-tools-heading,
+.tool-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fleet-tools-heading {
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.tool-actions {
+  width: 100%;
+}
+
+.tool-number-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tool-check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  font-weight: 500 !important;
+}
+
+.tool-check input {
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.tool-button {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px 11px;
+  background: #fff;
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 650;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.tool-button:hover:not(:disabled) {
+  border-color: #b7c8ec;
+  background: var(--panel-muted);
+}
+
+.tool-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.tool-button.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.tool-button.danger {
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #b91c1c;
+}
+
+.tool-button.subtle {
+  color: var(--text-soft);
+}
+
+.tool-hint,
+.tool-error,
+.tool-success {
+  margin: 0;
+  font-size: 0.76rem;
+}
+
+.tool-hint {
+  color: var(--text-soft);
+}
+
+.tool-error {
+  color: #b91c1c;
+}
+
+.tool-success {
+  margin: 0 0 12px;
+  color: #15803d;
+}
+
+.tool-geofence-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-geofence-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.tool-geofence-row > span {
+  flex: 1;
+  min-width: 100px;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.tool-geofence-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 0.68rem;
+  font-weight: 400;
+}
+
 @media (max-width: 1200px) {
   .stats-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1061,6 +1279,10 @@ th {
   .page-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .fleet-tools-grid {
+    grid-template-columns: 1fr;
   }
 }
 

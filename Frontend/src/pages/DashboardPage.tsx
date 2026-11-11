@@ -1,6 +1,7 @@
 import MapCanvas from '../components/map/MapCanvas';
+import FleetTools from '../components/admin/FleetTools';
 import type { AlertRecord, AlertSummary, Geofence } from '../types/api';
-import type { DisplayVehicle, VehicleStatus } from '../types/telemetry';
+import type { DisplayVehicle, Vehicle, VehicleStatus } from '../types/telemetry';
 
 interface Props {
   vehicles: DisplayVehicle[];
@@ -11,6 +12,8 @@ interface Props {
   connected: boolean;
   errors: string[];
   onAcknowledge: (id: string) => Promise<void>;
+  registeredVehicles: Vehicle[];
+  onRefresh: () => Promise<void>;
 }
 
 const statusNames: Record<VehicleStatus, string> = {
@@ -56,6 +59,8 @@ export function DashboardPage({
   connected,
   errors,
   onAcknowledge,
+  registeredVehicles,
+  onRefresh,
 }: Props) {
   const total = vehicles.length;
   const countByStatus = (status: VehicleStatus) => vehicles.filter((vehicle) => vehicle.status === status).length;
@@ -277,6 +282,8 @@ export function DashboardPage({
           <p className="empty">{loading ? 'Loading vehicles…' : 'No vehicles found in the backend.'}</p>
         )}
       </section>
+
+      <FleetTools vehicles={registeredVehicles} onRefresh={onRefresh} />
     </main>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSocket } from './hooks/useSocket';
 import { useVehicleStream } from './hooks/useVehicleStream';
 import { useAlerts } from './hooks/useAlerts';
@@ -40,46 +40,43 @@ function toDisplayVehicle(vehicle: Vehicle, liveUpdate?: ReturnType<typeof useVe
 export default function App() {
   const connected = useSocket();
   const streamVehicles = useVehicleStream();
-  const { alerts, summary, loading: alertsLoading, error: alertsError, acknowledge } = useAlerts();
+  const { alerts, summary, loading: alertsLoading, error: alertsError, acknowledge, refresh: refreshAlerts } = useAlerts();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [geofences, setGeofences] = useState<Geofence[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
 
-  useEffect(() => {
-    let active = true;
+  const loadData = useCallback(async () => {
+    const [vehiclesResult, geofencesResult] = await Promise.allSettled([getAllVehicles(), getGeofences()]);
+    const errors: string[] = [];
 
-    Promise.allSettled([getAllVehicles(), getGeofences()])
-      .then(([vehiclesResult, geofencesResult]) => {
-        if (!active) return;
-        const errors: string[] = [];
+    if (vehiclesResult.status === 'fulfilled') {
+      setVehicles(vehiclesResult.value.vehicles);
+    } else {
+      errors.push(vehiclesResult.reason instanceof Error
+        ? vehiclesResult.reason.message
+        : 'Unable to load vehicles');
+    }
 
-        if (vehiclesResult.status === 'fulfilled') {
-          setVehicles(vehiclesResult.value.vehicles);
-        } else {
-          errors.push(vehiclesResult.reason instanceof Error
-            ? vehiclesResult.reason.message
-            : 'Unable to load vehicles');
-        }
+    if (geofencesResult.status === 'fulfilled') {
+      setGeofences(geofencesResult.value.geofences);
+    } else {
+      errors.push(geofencesResult.reason instanceof Error
+        ? geofencesResult.reason.message
+        : 'Unable to load geofences');
+    }
 
-        if (geofencesResult.status === 'fulfilled') {
-          setGeofences(geofencesResult.value.geofences);
-        } else {
-          errors.push(geofencesResult.reason instanceof Error
-            ? geofencesResult.reason.message
-            : 'Unable to load geofences');
-        }
-
-        setLoadErrors(errors);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
+    setLoadErrors(errors);
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const refreshDashboard = useCallback(async () => {
+    await Promise.all([loadData(), refreshAlerts()]);
+  }, [loadData, refreshAlerts]);
 
   const displayVehicles = useMemo(() => {
     const liveUpdates = new Map(streamVehicles.map((update) => [update.vehicleId, update]));
@@ -101,8 +98,10 @@ export default function App() {
         alertSummary={summary}
         loading={loading || alertsLoading}
         connected={connected}
-        errors={[...loadErrors, ...(alertsError ? [alertsError] : [])]}
+        errors={[...new Set([...loadErrors, ...(alertsError ? [alertsError] : [])])]}
         onAcknowledge={acknowledge}
+        registeredVehicles={vehicles}
+        onRefresh={refreshDashboard}
       />
     </DashboardLayout>
   );

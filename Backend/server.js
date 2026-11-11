@@ -7,6 +7,8 @@ const { connectDB, closeDB } = require('./src/config/db');
 const workerPool = require('./src/workers/workerPool');
 const parsePool = require('./src/workers/parsePool');
 const redisService = require('./src/services/redisService');
+const vehicleStateWriter = require('./src/services/vehicleStateWriter');
+const simulatorService = require('./src/services/simulatorService');
 const { initSocketServer } = require('./src/sockets/socketServer');
 
 // Routes
@@ -16,6 +18,7 @@ const telemetryRoutes = require('./src/routes/telemetryRoutes');
 const analyticsRoutes = require('./src/routes/analyticsRoutes');
 const geofenceRoutes = require('./src/routes/geofenceRoutes');
 const alertRoutes = require('./src/routes/alertRoutes');
+const adminRoutes = require('./src/routes/adminRoutes');
 const { errorHandler, notFoundHandler } = require('./src/middlewares/errorHandler');
 
 const app = express();
@@ -58,6 +61,7 @@ app.use('/api/telemetry', telemetryRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/geofences', geofenceRoutes);
 app.use('/api/alerts', alertRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Error Handling
 app.use(notFoundHandler);
@@ -73,9 +77,14 @@ async function startServer(port = config.port) {
   await connectDB();
 
   await new Promise((resolve, reject) => {
-    serverInstance = app.listen(port, resolve);
+    // A long connection queue (backlog) so a burst of new connections is not refused
+    serverInstance = app.listen({ port, backlog: config.serverBacklog }, resolve);
     serverInstance.once('error', reject);
   });
+
+  // Keep idle connections open longer than the default 5 s, so clients reuse them instead of reconnecting
+  serverInstance.keepAliveTimeout = 65000;
+  serverInstance.headersTimeout = 66000;
 
   io = initSocketServer(serverInstance);
   app.set('io', io); // lets the health route report the real-time layer
@@ -83,7 +92,7 @@ async function startServer(port = config.port) {
   console.log(`====================================================`);
   console.log(`🚀 FleetDash Backend Server listening on port ${serverInstance.address().port}`);
   console.log(`⚡ Worker Threads Pool: ${config.workerPoolSize} threads active`);
-  console.log(`📦 MongoDB Bucket Pattern: max ${config.bucketMaxSize} readings/bucket`);
+  console.log(`📦 MongoDB Bucket Pattern: hourly buckets, safety cap ${config.bucketMaxSize} readings`);
   console.log(`====================================================`);
 
   return serverInstance;
@@ -94,6 +103,7 @@ function stopServer() {
   if (stopping) return stopping;
 
   stopping = (async () => {
+    simulatorService.stop(); // no more simulated readings while the server shuts down
     if (io) {
       // Disconnects every client, stops the broadcast timer and the Redis subscription, closes the HTTP server
       await new Promise((resolve) => io.close(resolve));
@@ -106,6 +116,7 @@ function stopServer() {
 
     await workerPool.terminate();
     await parsePool.terminate();
+    await vehicleStateWriter.flush(); // write the last vehicle positions while the database is still open
     await redisService.close();
     await closeDB();
   })();

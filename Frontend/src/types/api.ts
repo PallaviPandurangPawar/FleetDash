@@ -1,6 +1,6 @@
 // Frontend/src/types/api.ts
 // Week 1: API response types
-import type { Vehicle } from "./telemetry";
+import type { Vehicle, VehicleStatus } from './telemetry';
 
 export interface Geofence {
   _id: string;
@@ -65,4 +65,62 @@ export interface AlertsResponse {
   page: number;
   totalPages: number;
   alerts: AlertRecord[];
+}
+
+export interface VehicleInput {
+  vehicleId: string;
+  plateNumber: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  driverName?: string;
+}
+
+export type VehicleChanges = Partial<Omit<VehicleInput, 'vehicleId'>> & {
+  status?: VehicleStatus;
+};
+
+export interface VehicleResponse {
+  success: boolean;
+  vehicle: Vehicle;
+}
+
+export interface SimulatorState {
+  running: boolean;
+  vehicles: number;
+  requested: number;
+  intervalMs: number;
+  timeScale: number;
+  startedAt: string | null;
+  sent: number;
+  failed: number;
+  lastError: string | null;
+}
+
+export interface SimulatorResponse {
+  success: boolean;
+  simulator: SimulatorState;
+}
+
+export interface GenerateVehiclesResponse {
+  success: boolean;
+  requested: number;
+  created: number;
+  alreadyThere: number;
+  removed: number;
+  totalVehicles: number;
+}
+
+export interface ResetResponse {
+  success: boolean;
+  removed: {
+    vehicles: number;
+    geofences: number;
+    telemetryBuckets: number;
+    alerts: number;
+  };
+  restored: {
+    vehicles: { created: number; existing: number };
+    geofences: { created: number; existing: number };
+  } | null;
 }

@@ -39,6 +39,13 @@ export function useAlerts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const refresh = useCallback(async () => {
+    const [alertsResponse, alertSummary] = await Promise.all([getAlerts(), getAlertSummary()]);
+    setAlerts(alertsResponse.alerts);
+    setSummary(alertSummary);
+    setError(null);
+  }, []);
+
   useEffect(() => {
     let active = true;
     const handleLiveAlert = (payload: unknown) => {
@@ -62,12 +69,7 @@ export function useAlerts() {
 
     socket.on(EVENTS.GEOFENCE_ALERT, handleLiveAlert);
 
-    Promise.all([getAlerts(), getAlertSummary()])
-      .then(([alertsResponse, alertSummary]) => {
-        if (!active) return;
-        setAlerts(alertsResponse.alerts);
-        setSummary(alertSummary);
-      })
+    refresh()
       .catch((loadError: unknown) => {
         if (!active) return;
         setError(loadError instanceof Error ? loadError.message : 'Unable to load alerts');
@@ -80,7 +82,7 @@ export function useAlerts() {
       active = false;
       socket.off(EVENTS.GEOFENCE_ALERT, handleLiveAlert);
     };
-  }, []);
+  }, [refresh]);
 
   const acknowledge = useCallback(async (id: string) => {
     setError(null);
@@ -97,5 +99,5 @@ export function useAlerts() {
     }
   }, []);
 
-  return { alerts, summary, loading, error, acknowledge };
+  return { alerts, summary, loading, error, acknowledge, refresh };
 }

@@ -21,7 +21,7 @@ cd Backend
 npm install
 copy .env.example .env      # on Mac/Linux: cp .env.example .env
 npm run dev                 # restarts on file changes
-npm run seed                # optional: 10 sample vehicles and 3 sample geofences
+npm run seed                # optional: 10 sample vehicles and 3 sample geofences (add -- --history=24 for 24 hours of sample telemetry)
 node scripts/simulator.js   # optional: 20 fake trucks driving around Kolkata
 ```
 
@@ -35,7 +35,7 @@ The server listens on `http://localhost:5000`. Check `GET /api/health`.
 | `npm run dev` | Start the server and restart it when files change |
 | `npm test` | Run all tests |
 | `npm run test:coverage` | Run all tests and print a coverage table |
-| `npm run seed` | Add sample vehicles (`FLEET-001`...) and geofences. Safe to run again. Use `node scripts/seed.js --count=50` for more vehicles |
+| `npm run seed` | Add sample vehicles (`FLEET-001`...) and geofences. Safe to run again. Use `node scripts/seed.js --count=50` for more vehicles and `--history=24` for 24 finished hours of sample telemetry (one hourly bucket per vehicle per hour) |
 | `npm run seed:reset` | Remove only the data the seed script created |
 
 Other scripts in `scripts/`: `simulator.js` (fake vehicles), `socketListener.js` (print live messages),
@@ -48,10 +48,13 @@ Other scripts in `scripts/`: `simulator.js` (fake vehicles), `socketListener.js`
 | `PORT` | 5000 | HTTP port |
 | `NODE_ENV` | development | `development` also puts stack traces into error responses |
 | `MONGODB_URI` | mongodb://localhost:27017/fleetdash | MongoDB connection string |
-| `REDIS_URL` | redis://127.0.0.1:6379 | Redis connection |
+| `REDIS_URL` | redis://127.0.0.1:6379 | Redis connection (single mode) |
+| `REDIS_MODE` | single | `single` (one Redis server) or `cluster` (Redis Cluster) |
+| `REDIS_CLUSTER_NODES` | (empty) | Cluster mode: start nodes as `host:port`, separated by commas. Empty = the Docker Compose cluster on this PC (127.0.0.1, ports 7001 to 7003) |
+| `REDIS_CLUSTER_NAT` | (automatic) | Cluster mode: `docker-host` translates the Docker-internal node addresses to 127.0.0.1:7001 to 7006, `none` does not. Automatic = `docker-host` when `REDIS_CLUSTER_NODES` is empty |
 | `WORKER_POOL_SIZE` | CPU cores (2 to 8) | Worker threads for analytics |
 | `PARSE_POOL_SIZE` | 2 | Worker threads that validate large batches |
-| `BUCKET_MAX_SIZE` | 100 | Readings per bucket document |
+| `BUCKET_MAX_SIZE` | 1000 | Safety cap of readings per hourly bucket (one bucket = one vehicle for one clock hour) |
 | `MAX_BATCH_SIZE` | 5000 | Largest `/ingest-batch` request |
 | `FLUSH_INTERVAL_MS` | 10 | How long readings are grouped before one database write |
 | `BROADCAST_INTERVAL_MS` | 100 | How often live updates are sent to dashboards |
@@ -59,13 +62,17 @@ Other scripts in `scripts/`: `simulator.js` (fake vehicles), `socketListener.js`
 | `CORS_ORIGIN` | * | Browser origin allowed to connect to Socket.io |
 | `LOG_LEVEL` | info | `debug`, `info`, `warn`, `error` or `silent` |
 | `LOG_REQUESTS` | true | Set to `false` to silence per-request logs (load tests) |
+| `ADMIN_API_KEY` | (empty) | Secret for the admin API (`/api/admin/*` and deleting vehicles), sent in the `x-admin-key` header. Empty = the admin API stays closed (503). Make one with `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`. With Docker Compose, put it in a `.env` file next to `docker-compose.yml` |
 
 ## How it works
 
 ### MongoDB bucket pattern
 One document per GPS reading would create millions of tiny documents. Instead, readings are grouped into
-**buckets of up to 100 readings** (`TelemetryBucket`). Each bucket keeps a ready-made summary (min/max/sum speed,
-fuel, engine temperature), updated with atomic `$push`, `$inc`, `$min` and `$max` operations.
+**hourly buckets** (`TelemetryBucket`): one bucket holds the readings of one vehicle for one clock hour (UTC).
+`BUCKET_MAX_SIZE` is only a safety cap: a vehicle that sends more readings in one hour gets another bucket for
+that hour, so a document never grows too big. A late reading goes into the bucket of its own hour. Buckets
+written by the earlier count-based version stay readable. Each bucket keeps a ready-made summary (min/max/sum
+speed, fuel, engine temperature), updated with atomic `$push`, `$inc`, `$min` and `$max` operations.
 
 One compound index serves both "find the open bucket" and "latest buckets of a vehicle":
 
@@ -73,7 +80,7 @@ One compound index serves both "find the open bucket" and "latest buckets of a v
 { vehicleId: 1, bucketStartTime: -1, count: 1 }
 ```
 
-Measured query time is about 1 ms (see `loadtests/README.md`).
+Measured query time is under 3 ms (about 1.8 ms on average, see `loadtests/README.md`).
 
 ### Ingestion
 1. `validateTelemetry` middleware rejects bad input with a 400: vehicle IDs must be 1 to 16 characters
@@ -87,6 +94,10 @@ Measured query time is about 1 ms (see `loadtests/README.md`).
 ### Real-time layer
 Redis pub/sub decouples ingestion from the dashboards. The Socket.io server subscribes to Redis, collects the
 newest position of each vehicle for 100 ms and sends them to all clients as **one binary message**.
+
+With `REDIS_MODE=cluster` the same code runs against a Redis Cluster (cluster-aware ioredis client, `config/redis.js`).
+The cluster passes every published message on to all nodes, so a subscriber on any node receives it. A failed publish
+is tried once more (on another primary). `GET /api/health` then also shows the cluster state and every node.
 
 | Socket event | Payload |
 |---|---|
@@ -126,6 +137,7 @@ All routes start with `/api`. Errors look like `{ "success": false, "error": { "
 - `GET /vehicles?status=&page=&limit=` - list (limit 1 to 500, bad values fall back to defaults)
 - `GET /vehicles/:vehicleId` - one vehicle with its last position and telemetry
 - `PUT /vehicles/:vehicleId` - update details. `vehicleId`, `lastTelemetry` and `lastKnownLocation` cannot be changed here
+- `DELETE /vehicles/:vehicleId?deleteHistory=true` - admin key. Delete a vehicle; its history is kept unless `deleteHistory=true`
 
 ### Telemetry
 - `POST /telemetry/ingest` - one reading:
@@ -148,6 +160,14 @@ All routes start with `/api`. Errors look like `{ "success": false, "error": { "
 - `PATCH /alerts/:id/acknowledge`
 - `POST /alerts/acknowledge-all` - optional `{ "vehicleId": "..." }`
 
+### Admin (needs the `x-admin-key` header)
+- `GET /admin/ping` - check the key
+- `POST /admin/vehicles/generate` - `{ count, trim }`: create (and with `trim`, remove) the sample `FLEET-xxx` vehicles
+- `POST /admin/reset` - `{ confirm: true, restore }`: remove or restore the sample data
+- `POST /admin/simulator/start`, `POST /admin/simulator/stop`, `GET /admin/simulator/status` - the vehicle simulator, which runs inside the server
+
+Details are in [`docs/api.md`](../docs/api.md).
+
 ### Analytics (worker threads)
 - `GET /analytics/trip-summary/:vehicleId?startTime=&endTime=&limit=&speedLimit=80&harshBrakeThreshold=25` - distance, duration, average and top speed, speeding count, harsh braking count, idle time and a safety score (100 minus 2 per speeding reading and 5 per harsh braking, never below 10)
 - `POST /analytics/geofence-check` - `{ "vehicleId": "...", "geofences": [{ "name": "A", "polygon": [[lon, lat], ...] }] }` returns the stored readings that are inside each polygon
@@ -164,13 +184,38 @@ Jest and Supertest. The tests use the separate database `fleetdash_test` (set in
 own `TEST-` data, so your normal data is never touched. They need **MongoDB and Redis running**. The test suites
 share one database, so Jest runs them one after another.
 
-- `tests/unit` - validators, binary codec, geofence logic, analytics maths and worker threads, bucket service, seed script
-- `tests/integration` - telemetry, vehicles, geofences and alerts, analytics and Socket.io (Redis to client) APIs
+- `tests/unit` - validators, binary codec, geofence logic, analytics maths and worker threads, bucket service, seed script, Redis settings
+- `tests/integration` - telemetry, vehicles, geofences and alerts, analytics, the admin API and Socket.io (Redis to client) APIs
+
+Using the Docker Compose containers (MongoDB on port 27018, Redis on 6380)? Point the tests at them first
+(Windows; on Mac and Linux use `export`):
+
+```bat
+set TEST_MONGODB_URI=mongodb://127.0.0.1:27018/fleetdash_test
+set REDIS_URL=redis://127.0.0.1:6380
+```
+
+### Tests against the Redis Cluster
+
+`tests/integration/redisCluster.test.js` and `redisFailover.test.js` are skipped unless `REDIS_MODE=cluster`. In cluster mode the
+whole suite runs against the cluster. The failover test stops the node a subscriber is connected to, stops a primary, and
+freezes a primary for 12 seconds (longer than the 5-second cluster timeout) so that its replica takes over; live updates must
+keep arriving, with no gap longer than 15 seconds.
+
+```bash
+# in the repository root: start the cluster (Docker Desktop must be running)
+docker compose --profile cluster up -d redis-cluster-init
+
+# in Backend: run all tests against the cluster (Windows)
+set REDIS_MODE=cluster
+npm test
+set REDIS_MODE=
+```
 
 ## Load testing
 
 k6 scripts are in `loadtests/` and the measured results are in `loadtests/README.md`:
-about 1,950 requests per second sustained with no lost data, p95 under 500 ms, and bucket queries around 1 ms.
+2,000 requests per second sustained with no lost data, p95 under 250 ms, and bucket queries under 3 ms.
 
 ## Project structure
 

@@ -3,7 +3,11 @@ const mongoose = require('mongoose');
 /**
  * MongoDB Bucket Pattern Schema for Fleet Telemetry
  *
- * Group readings into buckets capped at `maxCount` readings per document.
+ * Hourly buckets: one document holds the readings of ONE vehicle for ONE clock hour (UTC).
+ * `maxCount` is a safety cap: if a vehicle sends so many readings in one hour that the document would
+ * grow too big, another bucket is started for the same hour.
+ * Older buckets written by the previous count-based version (a fixed number of readings, any hours) are
+ * still read the same way: history and statistics only use bucketStartTime, bucketEndTime and count.
  * Pre-aggregates metrics directly in the bucket header for fast analytics.
  */
 const readingSubSchema = new mongoose.Schema(
@@ -31,7 +35,7 @@ const telemetryBucketSchema = new mongoose.Schema(
     bucketStartTime: { type: Date, required: true },
     bucketEndTime: { type: Date, required: true },
     count: { type: Number, required: true, default: 0 },
-    maxCount: { type: Number, required: true, default: 100 },
+    maxCount: { type: Number, required: true, default: 1000 },
     summary: {
       minSpeed: { type: Number, default: 0 },
       maxSpeed: { type: Number, default: 0 },
@@ -48,7 +52,7 @@ const telemetryBucketSchema = new mongoose.Schema(
 );
 
 // One compound index serves both:
-//  - ingest: find newest open bucket for a vehicle (vehicleId, sort by time, count < max)
+//  - ingest: find the open bucket of a vehicle for one clock hour (vehicleId, bucketStartTime inside the hour, count < cap)
 //  - history: find a vehicle's buckets in a time range
 telemetryBucketSchema.index({ vehicleId: 1, bucketStartTime: -1, count: 1 });
 
