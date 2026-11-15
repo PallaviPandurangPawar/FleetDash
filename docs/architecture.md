@@ -52,7 +52,7 @@ blocking the server.
 ## 2. Storage: the Bucket Pattern
 
 One document per GPS reading would create millions of small documents. Readings are grouped into
-**buckets of up to 100** (`BUCKET_MAX_SIZE`).
+**buckets of up to 1,000 by default** (`BUCKET_MAX_SIZE`).
 
 ```json
 {

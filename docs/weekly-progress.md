@@ -6,7 +6,7 @@ Status legend: Done / In progress / Not started. This log covers the backend; th
 
 - Express server with a clear structure (routes, controllers, services, models, middleware) and environment-based configuration
 - Reusable `worker_threads` pool with a task queue and automatic restart of crashed workers; a second pool validates large batches
-- MongoDB Bucket Pattern: `TelemetryBucket` (up to 100 readings per document, pre-calculated summary updated with atomic operators), `Vehicle` model, one compound index
+- MongoDB Bucket Pattern: `TelemetryBucket` (up to 1,000 readings per hourly bucket by default, pre-calculated summary updated with atomic operators), `Vehicle` model, one compound index
 - Ingestion API (single and batch), vehicle API, history and bucket statistics, validation middleware
 - Group-commit buffer: readings arriving within 10 ms are written together, each request answered after its data is stored
 - k6 load-testing scripts (single ingest, batch ingest, health) and helper scripts

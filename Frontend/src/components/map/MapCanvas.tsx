@@ -1,156 +1,197 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as maplibregl from 'maplibre-gl';
+import { setWorkerUrl } from 'maplibre-gl';
+import type { ErrorEvent, GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
+import type { FeatureCollection, Point, Polygon } from 'geojson';
+import mapWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Geofence } from '../../types/api';
-import type { DisplayVehicle, VehicleStatus } from '../../types/telemetry';
+import type { DisplayVehicle } from '../../types/telemetry';
 
 interface Props {
   vehicles: DisplayVehicle[];
   geofences: Geofence[];
 }
 
-const markerColors: Record<VehicleStatus, string> = {
-  active: '#16a34a',
-  in_transit: '#1d4ed8',
-  idle: '#f59e0b',
-  offline: '#64748b',
-  maintenance: '#ef4444',
-};
-
-interface Bounds {
-  minLon: number;
-  maxLon: number;
-  minLat: number;
-  maxLat: number;
+interface GeofenceProperties {
+  id: string;
+  name: string;
 }
 
-function getBounds(vehicles: DisplayVehicle[], geofences: Geofence[]): Bounds | null {
-  let minLon = Infinity;
-  let maxLon = -Infinity;
-  let minLat = Infinity;
-  let maxLat = -Infinity;
-  let hasCoordinates = false;
-  const include = ([longitude, latitude]: [number, number]) => {
-    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return;
-    hasCoordinates = true;
-    minLon = Math.min(minLon, longitude);
-    maxLon = Math.max(maxLon, longitude);
-    minLat = Math.min(minLat, latitude);
-    maxLat = Math.max(maxLat, latitude);
+const GEOFENCE_SOURCE = 'fleet-geofences';
+const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_API_KEY;
+
+setWorkerUrl(mapWorkerUrl);
+
+function buildVehicleFeatures(vehicles: DisplayVehicle[]): FeatureCollection<Point, { vehicleId: string }> {
+  return {
+    type: 'FeatureCollection',
+    features: vehicles.flatMap((vehicle) => vehicle.location ? [{
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: vehicle.location },
+      properties: { vehicleId: vehicle.vehicleId },
+    }] : []),
   };
+}
 
-  for (const vehicle of vehicles) {
-    if (vehicle.location) include(vehicle.location);
-  }
-  for (const geofence of geofences) {
-    for (const ring of geofence.polygon.coordinates) {
-      for (const coordinate of ring) include(coordinate);
-    }
-  }
-  if (!hasCoordinates) return null;
-
-  const longitudePadding = Math.max((maxLon - minLon) * 0.12, 0.005);
-  const latitudePadding = Math.max((maxLat - minLat) * 0.12, 0.005);
-
-  minLon -= longitudePadding;
-  maxLon += longitudePadding;
-  minLat -= latitudePadding;
-  maxLat += latitudePadding;
-  return { minLon, maxLon, minLat, maxLat };
+function buildGeofenceFeatures(geofences: Geofence[]): FeatureCollection<Polygon, GeofenceProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: geofences.filter((geofence) => geofence.active).map((geofence) => ({
+      type: 'Feature' as const,
+      geometry: {
+        type: 'Polygon' as const,
+        coordinates: geofence.polygon.coordinates,
+      },
+      properties: { id: geofence._id, name: geofence.name },
+    })),
+  };
 }
 
 export default function MapCanvas({ vehicles, geofences }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const vehicleMarkersRef = useRef(new Map<string, maplibregl.Marker>());
+  const didFitBounds = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
+
+  const vehicleData = useMemo(() => buildVehicleFeatures(vehicles), [vehicles]);
+  const geofenceData = useMemo(() => buildGeofenceFeatures(geofences), [geofences]);
+  const locatedCount = vehicleData.features.length;
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext('2d');
-    if (!canvas || !context) return;
+    const container = containerRef.current;
+    if (!container) return;
+    if (!MAPTILER_KEY) {
+      setMapError('MapTiler key is missing. Add VITE_MAPTILER_API_KEY to Frontend/.env and restart Vite.');
+      return;
+    }
 
-    const draw = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const { clientWidth: width, clientHeight: height } = canvas;
-      if (!width || !height) return;
+    const map = new maplibregl.Map({
+      container,
+      style: `https://api.maptiler.com/maps/streets-v4/style.json?key=${encodeURIComponent(MAPTILER_KEY)}`,
+      center: [88.3639, 22.5726],
+      zoom: 11,
+    });
+    mapRef.current = map;
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
 
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
-      context.setTransform(dpr, 0, 0, dpr, 0, 0);
-      context.clearRect(0, 0, width, height);
-      context.fillStyle = '#f6f9ff';
-      context.fillRect(0, 0, width, height);
-
-      context.strokeStyle = '#e5edf8';
-      context.lineWidth = 1;
-      for (let x = 0; x <= width; x += 42) {
-        context.beginPath();
-        context.moveTo(x, 0);
-        context.lineTo(x, height);
-        context.stroke();
-      }
-      for (let y = 0; y <= height; y += 42) {
-        context.beginPath();
-        context.moveTo(0, y);
-        context.lineTo(width, y);
-        context.stroke();
-      }
-
-      const bounds = getBounds(vehicles, geofences);
-      if (!bounds) return;
-
-      const padding = 34;
-      const plotWidth = Math.max(1, width - padding * 2);
-      const plotHeight = Math.max(1, height - padding * 2);
-      const project = ([longitude, latitude]: [number, number]) => ({
-        x: padding + ((longitude - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * plotWidth,
-        y: height - padding - ((latitude - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * plotHeight,
-      });
-
-      for (const geofence of geofences) {
-        context.beginPath();
-        geofence.polygon.coordinates.forEach((ring) => {
-          ring.forEach((coordinate, index) => {
-            const point = project(coordinate);
-            if (index === 0) context.moveTo(point.x, point.y);
-            else context.lineTo(point.x, point.y);
-          });
-        });
-        context.fillStyle = 'rgba(29, 78, 216, 0.08)';
-        context.strokeStyle = 'rgba(29, 78, 216, 0.55)';
-        context.lineWidth = 1.5;
-        context.fill();
-        context.stroke();
-        const labelPoint = geofence.polygon.coordinates[0]?.[0];
-        if (labelPoint) {
-          const point = project(labelPoint);
-          context.fillStyle = '#334155';
-          context.font = '600 11px system-ui';
-          context.fillText(geofence.name, point.x + 5, point.y - 5);
-        }
-      }
-
-      for (const vehicle of vehicles) {
-        if (!vehicle.location) continue;
-        const point = project(vehicle.location);
-        context.beginPath();
-        context.arc(point.x, point.y, 8, 0, Math.PI * 2);
-        context.fillStyle = 'rgba(255,255,255,0.94)';
-        context.fill();
-        context.beginPath();
-        context.arc(point.x, point.y, 5, 0, Math.PI * 2);
-        context.fillStyle = markerColors[vehicle.status];
-        context.fill();
-      }
+    const handleLoad = () => {
+      setMapError(null);
+      setMapReady(true);
+    };
+    const handleError = (event: ErrorEvent) => {
+      console.error('[Fleet map] MapTiler map error:', event.error.message);
+      setMapError('Map tiles could not load. Check the MapTiler key, key restrictions, and network connection.');
     };
 
-    draw();
-    const observer = new ResizeObserver(draw);
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, [vehicles, geofences]);
+    map.on('load', handleLoad);
+    map.on('error', handleError);
 
-  const locatedCount = vehicles.filter((vehicle) => vehicle.location).length;
+    return () => {
+      map.off('load', handleLoad);
+      map.off('error', handleError);
+      vehicleMarkersRef.current.forEach((marker) => marker.remove());
+      vehicleMarkersRef.current.clear();
+      map.remove();
+      mapRef.current = null;
+      setMapReady(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.isStyleLoaded()) return;
+
+    const existingGeofenceSource = map.getSource(GEOFENCE_SOURCE) as GeoJSONSource | undefined;
+    if (existingGeofenceSource) {
+      existingGeofenceSource.setData(geofenceData);
+    } else {
+      map.addSource(GEOFENCE_SOURCE, { type: 'geojson', data: geofenceData });
+      map.addLayer({
+        id: 'geofence-fill',
+        type: 'fill',
+        source: GEOFENCE_SOURCE,
+        paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.14 },
+      });
+      map.addLayer({
+        id: 'geofence-outline',
+        type: 'line',
+        source: GEOFENCE_SOURCE,
+        paint: { 'line-color': '#1d4ed8', 'line-width': 2 },
+      });
+      map.addLayer({
+        id: 'geofence-labels',
+        type: 'symbol',
+        source: GEOFENCE_SOURCE,
+        layout: {
+          'symbol-placement': 'point',
+          'text-field': ['get', 'name'],
+          'text-size': 11,
+          'text-font': ['Open Sans Semibold'],
+          'text-allow-overlap': false,
+        },
+        paint: {
+          'text-color': '#173b7a',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1.5,
+        },
+      });
+    }
+
+    const visibleIds = new Set<string>();
+    vehicles.forEach((vehicle) => {
+      if (!vehicle.location) return;
+      visibleIds.add(vehicle.vehicleId);
+
+      let marker = vehicleMarkersRef.current.get(vehicle.vehicleId);
+      if (!marker) {
+        const element = document.createElement('button');
+        element.type = 'button';
+        element.className = 'vehicle-marker';
+        element.setAttribute('aria-label', `Vehicle ${vehicle.vehicleId}`);
+        element.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.1 3.6h9.8c.8 0 1.5.5 1.8 1.2l1.6 4.4v7.1h-2v2.1h-2.2v-2.1H7.9v2.1H5.7v-2.1h-2V9.2l1.6-4.4c.3-.7 1-1.2 1.8-1.2Zm.1 2-1.2 3.1h12l-1.2-3.1H7.2Zm-1.2 5v3.4h12v-3.4H6Zm.7 1a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm10.6 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/></svg>';
+        const popup = new maplibregl.Popup({ closeButton: true, offset: 20 });
+        element.addEventListener('click', () => {
+          popup.addTo(map);
+        });
+        marker = new maplibregl.Marker({ element, anchor: 'center', rotationAlignment: 'map' })
+          .setLngLat(vehicle.location)
+          .setPopup(popup)
+          .addTo(map);
+        vehicleMarkersRef.current.set(vehicle.vehicleId, marker);
+      }
+
+      const element = marker.getElement();
+      element.className = `vehicle-marker vehicle-marker--${vehicle.status}`;
+      element.title = `${vehicle.vehicleId} · ${Math.round(vehicle.speed)} km/h`;
+      element.setAttribute('aria-label', `Vehicle ${vehicle.vehicleId}, ${vehicle.status.replace('_', ' ')}, ${Math.round(vehicle.speed)} kilometres per hour`);
+      marker.getPopup()?.setText(`${vehicle.vehicleId} · ${Math.round(vehicle.speed)} km/h · ${vehicle.status.replace('_', ' ')}`);
+      marker.setLngLat(vehicle.location).setRotation(vehicle.heading);
+      marker.getPopup()?.setLngLat(vehicle.location);
+    });
+
+    vehicleMarkersRef.current.forEach((marker, vehicleId) => {
+      if (visibleIds.has(vehicleId)) return;
+      marker.remove();
+      vehicleMarkersRef.current.delete(vehicleId);
+    });
+
+    if (!didFitBounds.current && (vehicleData.features.length > 0 || geofenceData.features.length > 0)) {
+      const bounds = new maplibregl.LngLatBounds();
+      vehicleData.features.forEach((feature) => bounds.extend(feature.geometry.coordinates as [number, number]));
+      geofenceData.features.forEach((feature) => {
+        feature.geometry.coordinates.forEach((ring) => ring.forEach((coordinate) => bounds.extend(coordinate as [number, number])));
+      });
+      map.fitBounds(bounds, { padding: 64, maxZoom: 13, duration: 0 });
+      didFitBounds.current = true;
+    }
+  }, [geofenceData, mapReady, vehicleData, vehicles]);
 
   return (
     <div className="map-area">
-      <canvas ref={canvasRef} aria-label={`Fleet map showing ${locatedCount} vehicle locations`} />
+      <div ref={containerRef} className="fleet-map" role="application" aria-label={`Interactive fleet map showing ${locatedCount} vehicle locations`} />
       <div className="map-label">
         Live map · {locatedCount} of {vehicles.length} vehicles located
       </div>
@@ -161,7 +202,8 @@ export default function MapCanvas({ vehicles, geofences }: Props) {
         <span><i className="legend-dot offline" />Offline</span>
         <span><i className="legend-zone" />Geofence</span>
       </div>
-      {!locatedCount && <div className="map-empty">Waiting for vehicle location data</div>}
+      {locatedCount === 0 && !mapError && <div className="map-empty">Waiting for vehicle location data</div>}
+      {mapError && <div className="map-error" role="alert">{mapError}</div>}
     </div>
   );
 }

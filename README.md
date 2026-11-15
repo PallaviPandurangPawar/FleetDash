@@ -11,7 +11,7 @@ without dropping a single data point. Built as an internship project for Infotac
 ## Highlights
 
 - **Fast ingestion:** about 1,950 requests per second sustained with no lost data (95th percentile 428 ms)
-- **Efficient storage:** MongoDB Bucket Pattern (100 readings per document), queries in about 1 ms
+- **Efficient storage:** MongoDB Bucket Pattern (up to 1,000 readings per hourly bucket by default), queries in about 1 ms
 - **Live updates:** Redis Pub/Sub and Socket.io deliver the newest position of every vehicle as one binary message every 100 ms
 - **Geofence alerts:** Turf.js detects enter and exit events and pushes them live
 - **Non-blocking analytics:** trip summary and safety score computed in worker threads

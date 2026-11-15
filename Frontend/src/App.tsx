@@ -74,6 +74,15 @@ export default function App() {
     void loadData();
   }, [loadData]);
 
+  // The live socket streams telemetry for known IDs; refresh the registry so newly registered vehicles
+  // appear in the sidebar and totals without making the operator reload the dashboard.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void getAllVehicles().then((result) => setVehicles(result.vehicles)).catch(() => undefined);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const refreshDashboard = useCallback(async () => {
     await Promise.all([loadData(), refreshAlerts()]);
   }, [loadData, refreshAlerts]);
