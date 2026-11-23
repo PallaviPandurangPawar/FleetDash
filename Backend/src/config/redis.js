@@ -84,7 +84,6 @@ function createClient(name, overrides = {}) {
     settings.mode === 'cluster'
       ? createClusterClient(overrides)
       : new Redis(REDIS_URL, {
-          lazyConnect: true,
           maxRetriesPerRequest: 1,
           enableOfflineQueue: false, // fail fast instead of piling up commands when Redis is down
           retryStrategy: (times) => Math.min(times * 200, 3000),

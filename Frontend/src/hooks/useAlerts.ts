@@ -1,103 +1,108 @@
-import { useCallback, useEffect, useState } from 'react';
-import { acknowledgeAlert, getAlertSummary, getAlerts } from '../services/api';
-import type { AlertRecord, AlertSummary, LiveAlert } from '../types/api';
+// Frontend/src/hooks/useAlerts.ts
+// Geofence alerts: the saved list, the live events from the socket, the unacknowledged count and the pop-ups.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { acknowledgeAlert, acknowledgeAllAlerts, getAlertSummary, getAlerts } from '../services/api';
 import { EVENTS, socket } from '../services/socketClient';
+import type { AlertRecord, GeofenceAlertEvent } from '../types/api';
 
-function isLiveAlert(value: unknown): value is LiveAlert {
-  if (!value || typeof value !== 'object') return false;
-  const alert = value as Partial<LiveAlert>;
-  return (
-    typeof alert.id === 'string' &&
-    (alert.type === 'enter' || alert.type === 'exit') &&
-    typeof alert.vehicleId === 'string' &&
-    typeof alert.geofenceId === 'string' &&
-    typeof alert.geofenceName === 'string' &&
-    typeof alert.lon === 'number' &&
-    typeof alert.lat === 'number' &&
-    typeof alert.occurredAt === 'number'
-  );
+const MAX_ALERTS = 100;
+const MAX_TOASTS = 3;
+const TOAST_MS = 6000;
+
+export interface Toast {
+  key: number;
+  alert: AlertRecord;
 }
 
-function toAlertRecord(alert: LiveAlert): AlertRecord {
-  const timestamp = new Date(alert.occurredAt).toISOString();
+// The socket event has a slightly different shape than a saved alert
+function fromEvent(event: GeofenceAlertEvent): AlertRecord {
+  const date = new Date(event.occurredAt);
+  const when = Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
   return {
-    _id: alert.id,
-    type: alert.type,
-    vehicleId: alert.vehicleId,
-    geofenceId: alert.geofenceId,
-    geofenceName: alert.geofenceName,
-    location: { type: 'Point', coordinates: [alert.lon, alert.lat] },
-    occurredAt: timestamp,
+    _id: event.id,
+    type: event.type,
+    vehicleId: event.vehicleId,
+    geofenceId: event.geofenceId,
+    geofenceName: event.geofenceName,
+    location: { type: 'Point', coordinates: [event.lon, event.lat] },
+    occurredAt: when,
     acknowledged: false,
-    createdAt: timestamp,
+    createdAt: when,
   };
 }
 
 export function useAlerts() {
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
-  const [summary, setSummary] = useState<AlertSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [unacknowledged, setUnacknowledged] = useState(0);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const known = useRef(new Set<string>()); // ids already counted, so nothing is counted twice
+  const toastKey = useRef(0);
 
-  const refresh = useCallback(async () => {
-    const [alertsResponse, alertSummary] = await Promise.all([getAlerts(), getAlertSummary()]);
-    setAlerts(alertsResponse.alerts);
-    setSummary(alertSummary);
-    setError(null);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    const handleLiveAlert = (payload: unknown) => {
-      if (!isLiveAlert(payload)) {
-        console.error('Received an invalid geofence alert from the live socket');
-        return;
-      }
-
-      const alert = toAlertRecord(payload);
-      setAlerts((current) => [alert, ...current.filter((item) => item._id !== alert._id)].slice(0, 50));
-      setSummary((current) => current
-        ? {
-            ...current,
-            total: current.total + 1,
-            unacknowledged: current.unacknowledged + 1,
-            exits: current.exits + (alert.type === 'exit' ? 1 : 0),
-            enters: current.enters + (alert.type === 'enter' ? 1 : 0),
-          }
-        : current);
-    };
-
-    socket.on(EVENTS.GEOFENCE_ALERT, handleLiveAlert);
-
-    refresh()
-      .catch((loadError: unknown) => {
-        if (!active) return;
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load alerts');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
-    return () => {
-      active = false;
-      socket.off(EVENTS.GEOFENCE_ALERT, handleLiveAlert);
-    };
-  }, [refresh]);
-
-  const acknowledge = useCallback(async (id: string) => {
-    setError(null);
+  const load = useCallback(async () => {
     try {
-      await acknowledgeAlert(id);
-      setAlerts((current) => current.map((alert) => (
-        alert._id === id ? { ...alert, acknowledged: true } : alert
-      )));
-      setSummary((current) => current
-        ? { ...current, unacknowledged: Math.max(0, current.unacknowledged - 1) }
-        : current);
-    } catch (acknowledgeError: unknown) {
-      setError(acknowledgeError instanceof Error ? acknowledgeError.message : 'Unable to acknowledge alert');
+      const [list, summary] = await Promise.all([getAlerts(MAX_ALERTS), getAlertSummary()]);
+      known.current = new Set(list.alerts.map((a) => a._id));
+      setAlerts(list.alerts);
+      setUnacknowledged(summary.unacknowledged);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load the alerts');
     }
   }, []);
 
-  return { alerts, summary, loading, error, acknowledge, refresh };
+  const dismissToast = useCallback((key: number) => {
+    setToasts((prev) => prev.filter((t) => t.key !== key));
+  }, []);
+
+  useEffect(() => {
+    load();
+
+    const onAlert = (event: GeofenceAlertEvent) => {
+      const alert = fromEvent(event);
+      if (known.current.has(alert._id)) return;
+      known.current.add(alert._id);
+
+      setAlerts((prev) => [alert, ...prev].slice(0, MAX_ALERTS));
+      setUnacknowledged((n) => n + 1);
+
+      toastKey.current += 1;
+      const key = toastKey.current;
+      setToasts((prev) => [...prev, { key, alert }].slice(-MAX_TOASTS));
+      window.setTimeout(() => dismissToast(key), TOAST_MS);
+    };
+
+    socket.on(EVENTS.GEOFENCE_ALERT, onAlert);
+    socket.on('connect', load); // after a reconnect, fetch what was missed
+
+    return () => {
+      socket.off(EVENTS.GEOFENCE_ALERT, onAlert);
+      socket.off('connect', load);
+    };
+  }, [load, dismissToast]);
+
+  const acknowledge = useCallback(async (id: string) => {
+    try {
+      await acknowledgeAlert(id);
+      setAlerts((prev) => prev.map((a) => (a._id === id ? { ...a, acknowledged: true } : a)));
+      const summary = await getAlertSummary();
+      setUnacknowledged(summary.unacknowledged);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not acknowledge the alert');
+    }
+  }, []);
+
+  const acknowledgeAll = useCallback(async () => {
+    try {
+      await acknowledgeAllAlerts();
+      setAlerts((prev) => prev.map((a) => ({ ...a, acknowledged: true })));
+      setUnacknowledged(0);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not acknowledge the alerts');
+    }
+  }, []);
+
+  return { alerts, unacknowledged, toasts, error, acknowledge, acknowledgeAll, dismissToast };
 }

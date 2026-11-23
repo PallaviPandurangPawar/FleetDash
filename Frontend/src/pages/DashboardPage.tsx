@@ -1,289 +1,189 @@
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSocket } from '../hooks/useSocket';
+import { useVehicleStream } from '../hooks/useVehicleStream';
+import type { DisplayVehicle, Vehicle } from '../types/telemetry';
+import { getGeofences, getVehicles } from '../services/api';
+import type { Geofence } from '../types/api';
+import { DashboardLayout } from '../components/layout/DashboardLayout';
+import Header from '../components/layout/Header';
+import Sidebar from '../components/layout/Sidebar';
 import MapCanvas from '../components/map/MapCanvas';
-import FleetTools from '../components/admin/FleetTools';
-import type { AlertRecord, AlertSummary, Geofence } from '../types/api';
-import type { DisplayVehicle, Vehicle, VehicleStatus } from '../types/telemetry';
+import { vehicleBuffer } from '../canvas/vehicleBuffer';
+import { useAlerts } from '../hooks/useAlerts';
+import AlertsPanel from '../components/alerts/AlertPanel';
+import AlertToasts from '../components/alerts/AlertToast';
 
-interface Props {
-  vehicles: DisplayVehicle[];
-  geofences: Geofence[];
-  alerts: AlertRecord[];
-  alertSummary: AlertSummary | null;
-  loading: boolean;
-  connected: boolean;
-  errors: string[];
-  onAcknowledge: (id: string) => Promise<void>;
-  registeredVehicles: Vehicle[];
-  onRefresh: () => Promise<void>;
-}
+export default function DashboardPage() {
+  const connected = useSocket();
+  const live = useVehicleStream();
+  const alerts = useAlerts();
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [registered, setRegistered] = useState<Vehicle[]>([]);
+  const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
+  const [geofences, setGeofences] = useState<Geofence[]>([]);
 
-const statusNames: Record<VehicleStatus, string> = {
-  active: 'Active',
-  in_transit: 'In transit',
-  idle: 'Idle',
-  offline: 'Offline',
-  maintenance: 'Maintenance',
-};
+  // The vehicle picked in the list or on the map; picking it again in the list clears the pick
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const toggleSelected = useCallback(
+    (id: string) => setSelectedId((prev) => (prev === id ? null : id)),
+    []
+  );
 
-const statusColors: Record<VehicleStatus, string> = {
-  active: 'var(--emerald)',
-  in_transit: 'var(--primary)',
-  idle: 'var(--amber)',
-  offline: 'var(--red)',
-  maintenance: 'var(--slate)',
-};
 
-function formatRelativeTime(value: string | number | null): string {
-  if (value === null) return 'No telemetry';
-  const timestamp = typeof value === 'number' ? value : new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return 'Unknown';
+  // Drawing a new geofence: the map collects the clicked corners
+  const [drawing, setDrawing] = useState(false);
+  const [draft, setDraft] = useState<[number, number][]>([]);
+  const startDrawing = useCallback(() => {
+    setDraft([]);
+    setDrawing(true);
+  }, []);
+  const stopDrawing = useCallback(() => {
+    setDrawing(false);
+    setDraft([]);
+  }, []);
+  const addCorner = useCallback(
+    (lon: number, lat: number) => setDraft((prev) => [...prev, [lon, lat]]),
+    []
+  );
+  const undoCorner = useCallback(() => setDraft((prev) => prev.slice(0, -1)), []);
+  const clearCorners = useCallback(() => setDraft([]), []);
 
-  const minutes = Math.round((timestamp - Date.now()) / 60_000);
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
-  if (Math.abs(minutes) < 60) return formatter.format(minutes, 'minute');
-  const hours = Math.round(minutes / 60);
-  if (Math.abs(hours) < 24) return formatter.format(hours, 'hour');
-  return formatter.format(Math.round(hours / 24), 'day');
-}
+  // Loads the registered vehicles again (also used after one is added, edited or deleted)
+  const loadVehicles = useCallback(() => {
+    getVehicles()
+      .then((res) => setRegistered(res.vehicles))
+      .catch((err: Error) => console.error('Could not load vehicles:', err));
+  }, []);
 
-function formatLocation(location: [number, number] | null): string {
-  if (!location) return 'Location unavailable';
-  return `${location[1].toFixed(4)}, ${location[0].toFixed(4)}`;
-}
+  useEffect(() => {
+    loadVehicles();
+  }, [loadVehicles]);
 
-export function DashboardPage({
-  vehicles,
-  geofences,
-  alerts,
-  alertSummary,
-  loading,
-  connected,
-  errors,
-  onAcknowledge,
-  registeredVehicles,
-  onRefresh,
-}: Props) {
-  const total = vehicles.length;
-  const countByStatus = (status: VehicleStatus) => vehicles.filter((vehicle) => vehicle.status === status).length;
-  const inTransit = countByStatus('in_transit');
-  const idle = countByStatus('idle');
-  const offline = countByStatus('offline');
-  const maintenance = countByStatus('maintenance');
-  const active = total - offline - maintenance;
-  const movingVehicles = vehicles.filter((vehicle) => vehicle.speed > 0);
-  const averageSpeed = movingVehicles.length
-    ? Math.round(movingVehicles.reduce((sum, vehicle) => sum + vehicle.speed, 0) / movingVehicles.length)
-    : 0;
-  const availability = total ? Math.round((active / total) * 100) : 0;
+  // Loads the active geofences for the map (also used after the sample data is reset)
+  const loadGeofences = useCallback(() => {
+    getGeofences()
+      .then((res) => setGeofences(res.geofences))
+      .catch((err: Error) => console.error('Could not load geofences:', err));
+  }, []);
 
-  const metrics = [
-    { label: 'Total vehicles', value: total.toLocaleString(), tone: 'cyan' },
-    { label: 'Operational', value: active.toLocaleString(), tone: 'green' },
-    { label: 'In transit', value: inTransit.toLocaleString(), tone: 'blue' },
-    { label: 'Idle', value: idle.toLocaleString(), tone: 'amber' },
-    { label: 'Offline', value: offline.toLocaleString(), tone: 'slate' },
-    { label: 'Unacknowledged alerts', value: (alertSummary?.unacknowledged ?? 0).toLocaleString(), tone: 'red' },
-    { label: 'Active geofences', value: geofences.length.toLocaleString(), tone: 'violet' },
-    { label: 'Fleet availability', value: `${availability}%`, tone: 'emerald' },
-  ];
+  useEffect(() => {
+    loadGeofences();
+  }, [loadGeofences]);
 
-  const statusBreakdown: VehicleStatus[] = ['in_transit', 'active', 'idle', 'maintenance', 'offline'];
-  const recentAlerts = alerts.slice(0, 5);
-  const speedVehicles = vehicles.filter((vehicle) => vehicle.speed > 0).slice(0, 12);
-  const maxSpeed = Math.max(1, ...speedVehicles.map((vehicle) => vehicle.speed));
-  const recentVehicles = vehicles.slice(0, 6);
+  // Called after vehicles were removed: forget their last live updates and reload the list
+  const handleRemoved = useCallback(
+    (vehicleIds: string[]) => {
+      vehicleIds.forEach((id) => vehicleBuffer.delete(id));
+      setRemovedIds((prev) => {
+        const next = new Set(prev);
+        vehicleIds.forEach((id) => next.add(id));
+        return next;
+      });
+      loadVehicles();
+      loadGeofences();
+      setSelectedId((prev) => (prev !== null && vehicleIds.includes(prev) ? null : prev));
+    },
+    [loadVehicles, loadGeofences]
+  );
+
+  const handleDeleted = useCallback(
+    (vehicleId: string) => handleRemoved([vehicleId]),
+    [handleRemoved]
+  );
+
+  const rows = useMemo<DisplayVehicle[]>(() => {
+    const byId = new Map<string, DisplayVehicle>();
+
+    for (const v of registered) {
+      byId.set(v.vehicleId, {
+        vehicleId: v.vehicleId,
+        plateNumber: v.plateNumber,
+        driverName: v.driverName,
+        status: v.status,
+        speed: v.lastTelemetry?.speed ?? 0,
+        fuelLevel: v.lastTelemetry?.fuelLevel ?? 0,
+        live: false,
+        registered: true,
+        make: v.make,
+        model: v.model,
+        year: v.year,
+        lon: v.lastKnownLocation?.coordinates[0],
+        lat: v.lastKnownLocation?.coordinates[1],
+      });
+    }
+
+    for (const u of live) {
+      const base = byId.get(u.vehicleId);
+      // A vehicle that was just deleted can still have a last live update: ignore it
+      if (!base && removedIds.has(u.vehicleId)) continue;
+      byId.set(u.vehicleId, {
+        vehicleId: u.vehicleId,
+        plateNumber: base?.plateNumber ?? '',
+        driverName: base?.driverName ?? 'Unassigned',
+        status: u.speed > 5 ? 'in_transit' : 'idle',
+        speed: u.speed,
+        fuelLevel: u.fuelLevel,
+        live: true,
+        registered: base !== undefined,
+        make: base?.make,
+        model: base?.model,
+        year: base?.year,
+        lon: u.lon,
+        lat: u.lat,
+        heading: u.heading,
+      });
+    }
+
+    return Array.from(byId.values());
+  }, [registered, live, removedIds]);
 
   return (
-    <main className="page-shell">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Operations overview</p>
-          <h1>Fleet command center</h1>
-        </div>
-        <div className="header-actions">
-          <span className={`connection-label ${connected ? 'connected' : 'disconnected'}`}>
-            {connected ? 'Live telemetry connected' : 'Waiting for live connection'}
-          </span>
-        </div>
-      </div>
-
-      {errors.map((error) => (
-        <div className="data-error" role="alert" key={error}>
-          Could not load backend data: {error}
-        </div>
-      ))}
-
-      {loading && <div className="loading-note" role="status">Loading fleet data…</div>}
-
-      <section className="stats-grid">
-        {metrics.map((metric) => (
-          <article key={metric.label} className={`stat-card ${metric.tone}`}>
-            <div className="stat-label">{metric.label}</div>
-            <div className="stat-row">
-              <div className="stat-value">{metric.value}</div>
-            </div>
-          </article>
-        ))}
-      </section>
-
-      <section className="workspace-grid">
-        <article className="panel map-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Live tracking</p>
-              <h2>Fleet activity overview</h2>
-            </div>
-            <div className="panel-status">
-              <span className={`status-dot ${connected ? 'online' : 'offline'}`} />
-              {connected ? 'Connected' : 'Disconnected'}
-            </div>
-          </div>
-          <MapCanvas vehicles={vehicles} geofences={geofences} />
-        </article>
-
-        <aside className="panel status-panel">
-          <div className="panel-header compact">
-            <span>Vehicle status</span>
-            <span className="tiny-number">{total} total</span>
-          </div>
-
-          <div className="distribution-list">
-            {statusBreakdown.map((status) => {
-              const count = countByStatus(status);
-              const percentage = total ? Math.round((count / total) * 100) : 0;
-              return (
-                <div key={status} className="distribution-item">
-                  <div className="distribution-label-row">
-                    <span>{statusNames[status]}</span>
-                    <strong>{count} <small>({percentage}%)</small></strong>
-                  </div>
-                  <div className="bar-track">
-                    <span
-                      className="bar-fill"
-                      style={{ width: `${percentage}%`, background: statusColors[status] }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mini-metrics">
-            <div>
-              <span>Average reported speed</span>
-              <strong>{averageSpeed} km/h</strong>
-            </div>
-            <div>
-              <span>Maintenance</span>
-              <strong>{maintenance}</strong>
-            </div>
-          </div>
-        </aside>
-      </section>
-
-      <section className="detail-grid">
-        <article className="panel">
-          <div className="panel-header compact">
-            <span>Recent geofence alerts</span>
-            <span className="tiny-number">{alertSummary?.unacknowledged ?? 0} unacknowledged</span>
-          </div>
-          {recentAlerts.length ? (
-            <ul className="alert-list">
-              {recentAlerts.map((alert) => (
-                <li key={alert._id}>
-                  <div className={`alert-bullet ${alert.type}`} />
-                  <div className="alert-copy">
-                    <div className="alert-title-row">
-                      <strong>Geofence {alert.type}</strong>
-                      <span className={`severity ${alert.type === 'exit' ? 'high' : 'low'}`}>
-                        {alert.type === 'exit' ? 'Exit' : 'Entry'}
-                      </span>
-                    </div>
-                    <span>{alert.vehicleId} · {alert.geofenceName}</span>
-                  </div>
-                  <div className="alert-time-action">
-                    <time>{formatRelativeTime(alert.occurredAt)}</time>
-                    {!alert.acknowledged && (
-                      <button
-                        type="button"
-                        className="ack-alert"
-                        onClick={() => void onAcknowledge(alert._id)}
-                        aria-label={`Acknowledge alert for ${alert.vehicleId}`}
-                      >
-                        Acknowledge
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="empty">{loading ? 'Loading alerts…' : 'No geofence alerts found.'}</p>
-          )}
-        </article>
-
-        <article className="panel">
-          <div className="panel-header compact">
-            <span>Live vehicle speeds</span>
-            <span className="tiny-number">Latest telemetry</span>
-          </div>
-          {speedVehicles.length ? (
-            <div className="speed-chart">
-              {speedVehicles.map((vehicle) => (
-                <div className="speed-chart-row" key={vehicle.vehicleId}>
-                  <span>{vehicle.vehicleId}</span>
-                  <div className="bar-track">
-                    <span
-                      className="bar-fill chart-bar"
-                      style={{ width: `${Math.max(4, (vehicle.speed / maxSpeed) * 100)}%` }}
-                    />
-                  </div>
-                  <strong>{Math.round(vehicle.speed)} <small>km/h</small></strong>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="empty">{loading ? 'Loading vehicles…' : 'No speed telemetry available.'}</p>
-          )}
-        </article>
-      </section>
-
-      <section className="panel table-panel">
-        <div className="panel-header compact">
-          <span>Recent vehicle activity</span>
-          <span className="tiny-number">Showing {recentVehicles.length} of {total}</span>
-        </div>
-
-        {recentVehicles.length ? (
-          <table>
-            <thead>
-              <tr>
-                <th>Vehicle</th>
-                <th>Registration</th>
-                <th>Status</th>
-                <th>Speed</th>
-                <th>Location (lat, lon)</th>
-                <th>Last telemetry</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentVehicles.map((vehicle) => (
-                <tr key={vehicle.vehicleId}>
-                  <td>{vehicle.vehicleId}</td>
-                  <td>{vehicle.plateNumber}</td>
-                  <td><span className={`table-status ${vehicle.status}`}>{statusNames[vehicle.status]}</span></td>
-                  <td>{Math.round(vehicle.speed)} km/h</td>
-                  <td>{formatLocation(vehicle.location)}</td>
-                  <td>{formatRelativeTime(vehicle.timestamp)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <p className="empty">{loading ? 'Loading vehicles…' : 'No vehicles found in the backend.'}</p>
+    <DashboardLayout
+      header={<Header connected={connected} vehicleCount={rows.length} liveCount={rows.filter((row) => row.live).length}
+      alertCount={alerts.unacknowledged}
+      onToggleAlerts={() => setAlertsOpen((open) => !open)} />}
+      sidebar={
+        <Sidebar
+          vehicles={rows}
+          onVehiclesChanged={loadVehicles}
+          connected={connected}
+          selectedId={selectedId}
+          onSelect={toggleSelected}
+          onVehicleDeleted={handleDeleted}
+          onVehiclesRemoved={handleRemoved}
+          onGeofencesChanged={loadGeofences}
+          draw={{
+            corners: draft,
+            onStart: startDrawing,
+            onUndo: undoCorner,
+            onClear: clearCorners,
+            onStop: stopDrawing,
+          }}
+        />
+      }
+    >
+      <>
+        <MapCanvas
+          vehicles={rows}
+          geofences={geofences}
+          drawing={drawing}
+          draft={draft}
+          onMapClick={addCorner}
+          selectedId={selectedId}
+          onSelectVehicle={setSelectedId}
+        />
+        {!alertsOpen && <AlertToasts toasts={alerts.toasts} onDismiss={alerts.dismissToast} />}
+        {alertsOpen && (
+          <AlertsPanel
+            alerts={alerts.alerts}
+            unacknowledged={alerts.unacknowledged}
+            error={alerts.error}
+            onAcknowledge={alerts.acknowledge}
+            onAcknowledgeAll={alerts.acknowledgeAll}
+            onClose={() => setAlertsOpen(false)}
+          />
         )}
-      </section>
-
-      <FleetTools vehicles={registeredVehicles} onRefresh={onRefresh} />
-    </main>
+      </>
+    </DashboardLayout>
   );
 }

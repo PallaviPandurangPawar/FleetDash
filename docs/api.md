@@ -11,7 +11,8 @@ Most errors look like this (validation, 404 for unknown routes, database errors)
 ```
 
 Some controllers return a short form: `{ "error": "message" }`. The status codes are:
-`400` bad input, `404` not found, `409` already exists. Database validation errors are returned as 400, never 500.
+`400` bad input, `401` missing or wrong admin key, `404` not found, `409` already exists, `503` admin API not configured.
+Database validation errors are returned as 400, never 500.
 
 ## Health
 
@@ -21,7 +22,7 @@ Some controllers return a short form: `{ "error": "message" }`. The status codes
 { "status": "ok", "timestamp": "...", "service": "FleetDash Backend Engine", "database": "connected",
   "workerPool": { "poolSize": 4, "activeWorkers": 0, "idleWorkers": 4, "pendingTasks": 0, "completedTasks": 0 },
   "uptimeSeconds": 372, "nodeVersion": "v22.23.4", "memoryUsageMB": 141,
-  "realtime": { "redis": "ready", "socketServer": "running", "socketClients": 3 } }
+  "realtime": { "redis": "ready", "redisMode": "single", "socketServer": "running", "socketClients": 3 } }
 ```
 
 ## Vehicles
@@ -32,6 +33,8 @@ Some controllers return a short form: `{ "error": "message" }`. The status codes
 | `GET /vehicles?status=&page=&limit=` | List vehicles. `limit` 1 to 500 (default 50); bad values fall back to the defaults. Returns `{ success, total, page, totalPages, vehicles }` |
 | `GET /vehicles/:vehicleId` | One vehicle with its last position and telemetry |
 | `PUT /vehicles/:vehicleId` | Update details. `vehicleId`, `lastTelemetry` and `lastKnownLocation` cannot be changed here |
+
+| `DELETE /vehicles/:vehicleId?deleteHistory=true` | **Admin key.** Delete the vehicle. Its telemetry history and alerts are kept unless `deleteHistory=true`; geofences are not changed. Returns `{ success, deleted, historyDeleted, removed: { telemetryBuckets, alerts } }`, `404` if unknown |
 
 Vehicle status values: `idle`, `in_transit`, `maintenance`, `offline` (set automatically from telemetry: moving = `in_transit`,
 stopped with the engine on = `idle`, stopped with the engine off = `offline`).
@@ -60,11 +63,11 @@ Validation: `vehicleId` is 1 to 16 characters (letters, numbers, `-`, `_`); long
 { "vehicleId": "TRUCK-01", "readings": [ { "coordinates": [88.36, 22.57], "speed": 40, "timestamp": "..." } ] }
 ```
 
-At most 5,000 readings. Invalid readings are skipped and counted. Response `201`:
+At most 5,000 readings. Invalid readings are skipped and counted. Readings are grouped by clock hour (UTC): a batch that crosses an hour boundary returns one entry per bucket. Response `201`:
 
 ```json
 { "success": true, "vehicleId": "TRUCK-01", "ingestedCount": 300, "rejectedCount": 0,
-  "buckets": [ { "bucketId": "...", "added": 100, "bucketCount": 100 } ] }
+  "buckets": [ { "bucketId": "...", "added": 300, "bucketCount": 300 } ] }
 ```
 
 The newest reading is also sent to live clients, and every reading is checked against the geofences.
@@ -116,6 +119,24 @@ An alert is created when a vehicle crosses a geofence boundary.
 | `GET /alerts/summary` | `{ total, unacknowledged, exits, enters }` |
 | `PATCH /alerts/:id/acknowledge` | Mark one alert as handled. Returns `{ alert }` |
 | `POST /alerts/acknowledge-all` | Body `{ "vehicleId": "..." }` is optional. Returns `{ acknowledged: <number> }` |
+
+## Admin API
+
+These routes need the admin key in the `x-admin-key` header. The key is the server's `ADMIN_API_KEY` setting. Without
+the header, or with a wrong key, the answer is `401`. If the server has no `ADMIN_API_KEY` at all, the admin API stays
+closed and answers `503`. The dashboard's "Unlock admin" button checks a key with `GET /admin/ping`.
+
+| Method and path | What it does |
+|---|---|
+| `GET /admin/ping` | Checks the key. Returns `{ success: true, admin: true }` |
+| `POST /admin/vehicles/generate` | Body `{ "count": 1 to 500, "trim": false }`. Makes sure the sample vehicles `FLEET-001` ... `FLEET-<count>` exist: missing ones are created, existing ones are not changed. With `"trim": true`, sample vehicles numbered above `count` are removed (their history is kept). Other vehicles are never touched, and sample geofences are not re-created. Returns `{ success, requested, created, alreadyThere, removed, totalVehicles }` |
+| `POST /admin/reset` | Body `{ "confirm": true, "restore": false }`. Removes only what the seed script created: the `FLEET-xxx` vehicles with their telemetry and alerts, and the geofences whose description starts with "Seeded sample geofence". With `"restore": true` the default sample data (10 vehicles and 3 geofences) is created again. Returns `{ success, removed: { vehicles, geofences, telemetryBuckets, alerts }, restored }` |
+| `POST /admin/simulator/start` | Body (all optional) `{ "count": 20, "intervalMs": 1000, "timeScale": 10 }`, limits 1 to 500, 250 to 10000 and 1 to 100. Drives the first `count` registered vehicles (sorted by id) around Kolkata and stores their readings. Restarts if it is already running. `409` when no vehicle exists. Returns `{ success, simulator }` |
+| `POST /admin/simulator/stop` | Stops it. The counters stay until the next start |
+| `GET /admin/simulator/status` | `{ success, simulator: { running, vehicles, requested, intervalMs, timeScale, startedAt, sent, failed, lastError } }` |
+
+The simulator runs inside the server. It drops a vehicle when it is deleted, trimmed or reset. After vehicles are added,
+call `start` again to include them.
 
 ## Analytics (worker threads)
 
@@ -204,4 +225,13 @@ socket.on('vehicles:binary', (data) => {
 socket.on('geofence:alert', (alert) => console.log('ALERT', alert.type, alert.vehicleId, alert.geofenceName));
 ```
 
-`realtime.redis` is the state of the Redis publisher (`ready` when healthy, `reconnecting` or `end` otherwise) and `realtime.socketClients` is the number of connected dashboards.
+`realtime.redis` is the state of the Redis publisher (`ready` when healthy, `reconnecting` or `end` otherwise), `realtime.redisMode` is `single` or `cluster`, and `realtime.socketClients` is the number of connected dashboards.
+
+With `REDIS_MODE=cluster` the answer also contains `realtime.redisCluster`: `state` is `ok` when every slot is served (`fail` when not, `unknown` when the cluster could not be asked), and every node has a `role` (`primary` or `replica`) and a `status` (`ok`, `possibly-down`, `fail` or `joining`):
+
+```json
+"realtime": { "redis": "ready", "redisMode": "cluster",
+  "redisCluster": { "state": "ok", "primaries": 3, "replicas": 3,
+    "nodes": [ { "address": "10.66.77.11:6379", "role": "primary", "status": "ok" }, "... 5 more nodes" ] },
+  "socketServer": "running", "socketClients": 3 }
+```

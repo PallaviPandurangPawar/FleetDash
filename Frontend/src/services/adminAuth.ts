@@ -1,15 +1,23 @@
+// Frontend/src/services/adminAuth.ts
+// Keeps the admin key for this browser tab only (sessionStorage: it is forgotten when the tab is closed).
 const STORAGE_KEY = 'fleetdash.adminKey';
 
-function readStoredKey(): string | null {
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+function readStored(): string | null {
   try {
     return sessionStorage.getItem(STORAGE_KEY);
   } catch {
-    return null;
+    return null; // the browser blocks storage: the key then lives in memory only
   }
 }
 
-let currentKey: string | null = readStoredKey();
-const listeners = new Set<() => void>();
+let currentKey: string | null = readStored();
+
+function notify(): void {
+  listeners.forEach((listener) => listener());
+}
 
 export function getAdminKey(): string | null {
   return currentKey;
@@ -20,9 +28,9 @@ export function setAdminKey(key: string): void {
   try {
     sessionStorage.setItem(STORAGE_KEY, key);
   } catch {
-    // Keep the key in memory for this page when browser storage is unavailable.
+    // ignore: the key just is not remembered after a refresh
   }
-  listeners.forEach((listener) => listener());
+  notify();
 }
 
 export function clearAdminKey(): void {
@@ -30,12 +38,15 @@ export function clearAdminKey(): void {
   try {
     sessionStorage.removeItem(STORAGE_KEY);
   } catch {
-    // The in-memory key is still cleared.
+    // ignore
   }
-  listeners.forEach((listener) => listener());
+  notify();
 }
 
-export function subscribeAdminKey(listener: () => void): () => void {
+/** Calls the listener whenever the key is set or cleared. Returns a function that stops listening. */
+export function subscribeAdminKey(listener: Listener): () => void {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }

@@ -2,19 +2,9 @@ const { createClient, settings } = require('../config/redis');
 
 const CHANNEL = 'fleet:updates'; // newest position per vehicle
 const ALERT_CHANNEL = 'fleet:alerts'; // geofence alerts
-
-let publisher;
-
-function getPublisher() {
-  if (!publisher || publisher.status === 'end') {
-    publisher = createClient('pub');
-  }
-
-  return publisher;
-}
+const publisher = createClient('pub');
 
 async function publish(channel, payload) {
-  const client = getPublisher();
   const message = JSON.stringify(payload);
   // In cluster mode a second try goes to another primary, so a node that is just going down loses nothing
   const attempts = settings.mode === 'cluster' ? 2 : 1;
@@ -22,7 +12,7 @@ async function publish(channel, payload) {
 
   for (let i = 0; i < attempts; i++) {
     try {
-      await client.publish(channel, message);
+      await publisher.publish(channel, message);
       return;
     } catch (err) {
       lastError = err;
@@ -43,7 +33,7 @@ function publishAlert(alert) {
 
 /** Connection state of the publisher: "ready" when healthy, "reconnecting" or "end" otherwise */
 function getStatus() {
-  return publisher && publisher.status ? publisher.status : 'not-started';
+  return publisher.status;
 }
 
 /** Waits for a promise, but gives up after `ms` so the health route can never hang */
@@ -74,7 +64,7 @@ function parseNodeLine(line) {
 /** State of the Redis Cluster and its nodes, as the cluster itself reports them. Never throws. */
 async function getClusterDetails() {
   const details = { state: 'unknown', primaries: 0, replicas: 0, nodes: [] };
-  if (!publisher || publisher.status !== 'ready') return details;
+  if (publisher.status !== 'ready') return details;
 
   try {
     const [info, nodeList] = await withTimeout(Promise.all([publisher.cluster('INFO'), publisher.cluster('NODES')]), 1500);
@@ -102,7 +92,7 @@ async function getDetails() {
 
 /** Closes the publisher connection (used when the server shuts down) */
 async function close() {
-  if (!publisher || publisher.status === 'end') return;
+  if (publisher.status === 'end') return;
   try {
     await publisher.quit();
   } catch (_err) {

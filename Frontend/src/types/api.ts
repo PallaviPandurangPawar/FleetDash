@@ -1,5 +1,5 @@
 // Frontend/src/types/api.ts
-// Week 1: API response types
+// API response types
 import type { Vehicle, VehicleStatus } from './telemetry';
 
 export interface Geofence {
@@ -26,23 +26,20 @@ export interface AlertRecord {
   createdAt: string;
 }
 
-export interface LiveAlert {
-  id: string;
-  type: 'exit' | 'enter';
-  vehicleId: string;
-  geofenceId: string;
-  geofenceName: string;
-  lon: number;
-  lat: number;
-  occurredAt: number;
-}
-
 export interface VehiclesResponse {
   success: boolean;
   total: number;
   page: number;
   totalPages: number;
   vehicles: Vehicle[];
+}
+
+export interface AlertsResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  totalPages: number;
+  alerts: AlertRecord[];
 }
 
 export interface GeofencesResponse {
@@ -59,13 +56,8 @@ export interface AlertSummary {
   enters: number;
 }
 
-export interface AlertsResponse {
-  success: boolean;
-  total: number;
-  page: number;
-  totalPages: number;
-  alerts: AlertRecord[];
-}
+
+// ---- Vehicle management and admin API ----
 
 export interface VehicleInput {
   vehicleId: string;
@@ -76,6 +68,7 @@ export interface VehicleInput {
   driverName?: string;
 }
 
+// What can be changed on an existing vehicle (the vehicleId itself cannot)
 export type VehicleChanges = Partial<Omit<VehicleInput, 'vehicleId'>> & {
   status?: VehicleStatus;
 };
@@ -83,6 +76,31 @@ export type VehicleChanges = Partial<Omit<VehicleInput, 'vehicleId'>> & {
 export interface VehicleResponse {
   success: boolean;
   vehicle: Vehicle;
+}
+
+export interface DeleteVehicleResult {
+  success: boolean;
+  deleted: string;
+  historyDeleted: boolean;
+  removed: { telemetryBuckets: number; alerts: number };
+}
+
+export interface GenerateVehiclesResult {
+  success: boolean;
+  requested: number;
+  created: number;
+  alreadyThere: number;
+  removed: number;
+  totalVehicles: number;
+}
+
+export interface ResetResult {
+  success: boolean;
+  removed: { vehicles: number; geofences: number; telemetryBuckets: number; alerts: number };
+  restored: {
+    vehicles: { created: number; existing: number };
+    geofences: { created: number; existing: number };
+  } | null;
 }
 
 export interface SimulatorState {
@@ -102,25 +120,20 @@ export interface SimulatorResponse {
   simulator: SimulatorState;
 }
 
-export interface GenerateVehiclesResponse {
-  success: boolean;
-  requested: number;
-  created: number;
-  alreadyThere: number;
-  removed: number;
-  totalVehicles: number;
+export interface SimulatorOptions {
+  count?: number;
+  intervalMs?: number;
+  timeScale?: number;
 }
 
-export interface ResetResponse {
-  success: boolean;
-  removed: {
-    vehicles: number;
-    geofences: number;
-    telemetryBuckets: number;
-    alerts: number;
-  };
-  restored: {
-    vehicles: { created: number; existing: number };
-    geofences: { created: number; existing: number };
-  } | null;
+// What the backend sends over the socket when a vehicle crosses a geofence edge
+export interface GeofenceAlertEvent {
+  id: string;
+  type: 'exit' | 'enter';
+  vehicleId: string;
+  geofenceId: string;
+  geofenceName: string;
+  lon: number;
+  lat: number;
+  occurredAt: string | number;
 }
